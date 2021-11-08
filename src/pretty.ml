@@ -4,129 +4,164 @@ open Format
 open Tast
 
 let binop = function
-  | Ast.Badd -> "+"
-  | Bsub -> "-"
-  | Bmul -> "+"
-  | Bdiv -> "/"
-  | Bmod -> "%"
-  | Beq -> "=="
-  | Bne -> "!="
-  | Blt -> "<"
-  | Ble -> "<="
-  | Bgt -> ">"
-  | Bge -> ">="
-  | Band -> "&&"
-  | Bor -> "||"
+  | Ast.Badd -> " + "
+  | Bsub -> " - "
+  | Bmul -> " * "
+  | Bdiv -> " / "
+  | Bmod -> " % "
+  | Beq -> " == "
+  | Bne -> " != "
+  | Blt -> " < "
+  | Ble -> " <= "
+  | Bgt -> " > "
+  | Bge -> " >= "
+  | Band -> " && "
+  | Bor -> " || "
 let unop = function
   | Ast.Uneg -> "-"
   | Unot -> "!"
   | Uamp -> "&"
   | Ustar -> "*"
 
-(* TODO afficher ast non type *)
-(* let ast_file fmt dl = ... *)
+let print_constant fmt = function
+   |Cbool(x) -> pp_print_string fmt (string_of_bool x)
+   |Cint(x) -> pp_print_string fmt  (Int64.to_string x)
+   |Cstring(x) -> pp_print_string fmt ("\""^x^"\"")
 
-let draw_constant : constant -> string = function
-   |Cbool(x) -> string_of_bool x
-   |Cint(x) -> Int64.to_string x
-   |Cstring(x) -> "\""^x^"\""
+let rec print_ptyp fmt = function
+   |PTident(ident) -> 
+      if ident.id <> "bool" && ident.id <> "int" then
+      pp_print_string fmt ident.id
+   |PTptr(ptyp) ->
+      pp_print_char fmt '*';
+      print_ptyp fmt ptyp
+
+      
+let rec print_pfields fmt : pfield list -> unit= function
+   |[] -> ()
+   |(ident,ptyp)::r ->       
+      pp_print_string fmt ident.id;
+      pp_print_char fmt ' ';
+      print_ptyp fmt ptyp;
+      pp_print_cut fmt ();
+      print_pfields fmt r
 
 
-let draw_unop fmt  = function
-   | Uneg -> pp_print_char fmt  '-'
-   | Unot -> pp_print_char fmt  '!'
-   | Uamp -> pp_print_char fmt  '&'
-   | Ustar-> pp_print_char fmt  '*'
+let rec print_pparam fmt :pparam list -> unit = function
+   |[] -> ()
+   |[(ident,ptyp)] -> 
+      pp_print_string fmt ident.id;
+      pp_print_char fmt ' ';
+      print_ptyp fmt ptyp
+   |(ident,ptyp)::r ->       
+      pp_print_string fmt ident.id;
+      pp_print_char fmt ' ';
+      print_ptyp fmt ptyp;
+      pp_print_char fmt ',';
+      print_pparam fmt r      
 
-let draw_binop fmt = function
-   | Badd -> pp_print_string fmt "+"
-   | Bsub -> pp_print_string fmt "-"
-   | Bmul -> pp_print_string fmt "*"
-   | Bdiv -> pp_print_string fmt "/"
-   | Bmod -> pp_print_string fmt "%"
-   | Beq  -> pp_print_string fmt "="
-   | Bne  -> pp_print_string fmt "!="
-   | Blt  -> pp_print_string fmt "<" 
-   | Ble  -> pp_print_string fmt "<="
-   | Bgt  -> pp_print_string fmt ">"
-   | Bge  -> pp_print_string fmt ">="
-   | Band -> pp_print_string fmt "&&"
-   | Bor  -> pp_print_string fmt "||"
-
-let rec draw_pexpr (fmt : Format.formatter) e = 
+let rec print_pexpr (fmt : Format.formatter) e = 
    match e.pexpr_desc with
    | PEskip -> ()
-   | PEconstant(x) -> pp_print_string fmt (draw_constant x)
+   | PEconstant(x) -> print_constant fmt x
    | PEbinop(op,e1,e2) -> 
-      draw_pexpr fmt e1;
-      draw_binop fmt op;
-      draw_pexpr fmt e2
+      print_pexpr fmt e1;
+      pp_print_string fmt (binop op);
+      print_pexpr fmt e2
    | PEunop(op,e1) -> 
-      draw_unop fmt op;
-      draw_pexpr fmt e1
+      pp_print_string fmt (unop op);
+      print_pexpr fmt e1
    | PEnil -> pp_print_string fmt "NIL"
-(* | PEcall(_,pexprs) -> *) (*aucune idée de ce que c'est*)
-   | PEident(_) -> () 
-   | PEdot(e1,_) -> 
-      pp_print_char fmt '.';
-      draw_pexpr fmt e1;
-      pp_print_char fmt ' '
+   | PEcall(ident,pexprs) -> 
+      pp_print_string fmt ident.id;
+      pp_print_char fmt '(';
+      print_pexpr_list fmt "," pexprs;
+      pp_print_char fmt ')'
 
-   (*| PEassign of pexpr list * pexpr list
-   | PEvars of ident list * ptyp option * pexpr list*)
+   | PEident(ident) -> pp_print_string fmt ident.id 
+   | PEdot(e1,ident) -> 
+      print_pexpr fmt e1;
+      pp_print_string fmt ("."^ident.id);
+   | PEassign(pexprs1,pexprs2) ->
+      print_pexpr_list fmt "," pexprs1;
+      pp_print_string fmt " = ";
+      print_pexpr_list fmt "," pexprs2
+   | PEvars(idents,typeo,pexprs) -> () (*TODO print les PEvars*)
 
    | PEif(cond,yes,no) -> 
       pp_print_string fmt "if ("; 
-      draw_pexpr fmt cond;
+      print_pexpr fmt cond;
       pp_print_string fmt ")";
-      draw_pexpr fmt yes;
+      print_pexpr fmt yes;
       pp_print_string fmt "else";
-      draw_pexpr fmt no     
-
+      print_pexpr fmt no     
    | PEreturn(pexprs) -> 
-      List.iter 
-         (fun e1 -> 
-            draw_pexpr fmt e1;
-            pp_print_char fmt ';') pexprs
+      print_pexpr_list fmt "," pexprs
    | PEblock(pexprs) ->
-      pp_open_box fmt 5;
-      List.iter 
-         (fun e1 ->
-            draw_pexpr fmt e1)
-         pexprs;
-      pp_close_box fmt ()
+      pp_print_string fmt "{";
+      pp_print_cut fmt ();
+      pp_open_vbox fmt 2;
+      pp_print_string fmt "  ";
+      print_pexpr_list ~newline:true fmt "" pexprs;
+      pp_close_box fmt ();
+      pp_print_cut fmt ();
+      pp_print_string fmt "}";
    | PEfor(loop,e1) -> 
       pp_print_string fmt "for (";
-      draw_pexpr fmt loop;
+      print_pexpr fmt loop;
       pp_print_string fmt ") ";
-      draw_pexpr fmt e1
+      print_pexpr fmt e1
+   
    | PEincdec(e1,incdec) -> 
-      draw_pexpr fmt e1;
+      print_pexpr fmt e1;
       pp_print_string fmt
          (if incdec = Inc then "++" else "--")
-   |_ -> ()
 
-let draw_pfunc (fmt : Format.formatter) (f : Ast.pfunc)  = 
+and print_pexpr_list ?newline:(newline = false) fmt c =
+      function
+      |[] -> ()
+      |[x] -> print_pexpr fmt x
+      |h::l -> 
+         print_pexpr fmt h;
+         pp_print_string fmt c;
+         if newline then pp_print_cut fmt ();
+         print_pexpr_list ~newline:newline fmt c l
+
+
+let print_pfunc (fmt : Format.formatter) (f : Ast.pfunc)  = 
+   pp_print_string fmt "func ";
    pp_print_string fmt f.pf_name.id;
    pp_print_char fmt '(';
+   print_pparam fmt f.pf_params;
+   pp_print_string fmt ") ";
+   print_pexpr fmt f.pf_body
 
-   pp_print_char fmt ')'
+let print_pstruct fmt e = 
+   pp_print_string fmt ("struct "^e.ps_name.id^" { ");
+   pp_open_vbox fmt 0;
+   pp_print_cut fmt ();
+   print_pfields fmt e.ps_fields;
+   pp_close_box fmt ();
+   pp_print_char fmt '}'
 
-
-
-   
-
-(*let rec ast_file (fmt : Format.formatter) (dl: Ast.pdecl list) = 
+let rec ast_file (fmt : Format.formatter) (dl: Ast.pdecl list) = 
+   pp_open_vbox fmt 0;
    match dl with
       |[] -> ()
-      |PDfunction(f)::t -> pp_open_box fmt 5;
-                           draw_pfunc fmt f;
-                           pp_close_box fmt ();
-                           pp_print_char fmt ';';
-                           ast_file fmt t
-      |PDstruct(s)::t -> ()
+      |PDfunction(f)::t -> 
+         print_pfunc fmt f;
+         pp_print_cut fmt ();
+         pp_print_cut fmt ();
+         pp_close_box fmt ();
+         ast_file fmt t
+      |PDstruct(s)::t -> 
+         print_pstruct fmt s;
+         pp_print_cut fmt ();
+         pp_print_cut fmt ();
+         pp_close_box fmt ();
+         ast_file fmt t
 
-*)
+
 
 let rec typ fmt = function
   | Tint -> fprintf fmt "int"
@@ -134,12 +169,13 @@ let rec typ fmt = function
   | Tstring -> fprintf fmt "string"
   | Tstruct s -> fprintf fmt "%s" s.s_name
   | Tptr ty -> fprintf fmt "*%a" typ ty
+  |_ -> ()
 
 
-  (* TODO autres types utilises par l'analyse semantique *)
+(* TODO autres types utilises par l'analyse semantique *)
 
 let rec expr fmt e = match e.expr_desc with
-  | TEskip -> fprintf fmt ";"
+  | TEskip -> ()
   | TEnil -> fprintf fmt "ni"
   | TEconstant (Cint n) -> fprintf fmt "%Ld" n
   | TEconstant (Cbool b) -> fprintf fmt "%b" b

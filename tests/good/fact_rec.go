@@ -11,6 +11,6 @@ func fact(n int) int {
 func main() {
   for n := 0; n <= 10; n++ {
 	  fmt.Print(fact(n));
-	  fmt.Print("\n")
+	  fmt.Print("\\n")
   }
 }
