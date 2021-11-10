@@ -27,6 +27,7 @@ let rec eq_type ty1 ty2 = match ty1, ty2 with
   | Tint, Tint | Tbool, Tbool | Tstring, Tstring -> true
   | Tstruct s1, Tstruct s2 -> s1 == s2
   | Tptr ty1, Tptr ty2 -> eq_type ty1 ty2
+  | Tmany man1, Tmany man2 -> List.filter (fun x -> not (List.mem x man1 )) man2 = []
   | _ -> false
     (* TODO autres types *)
 
@@ -75,13 +76,21 @@ and expr_desc env loc = function
   | PEskip ->
      TEskip, tvoid, false
   | PEconstant c ->
-    (* TODO *) TEconstant c, tvoid, false
+      TEconstant c, 
+      (match c with
+        |Cbool _ -> Tbool
+        |Cint _ -> Tint
+        |Cstring _ -> Tstring
+      )
+      , false
   | PEbinop (op, e1, e2) ->
-    (* TODO *) assert false
+    TEbinop(op,fst (expr env e1),fst (expr env e2)), Tbool,false
   | PEunop (Uamp, e1) ->
-    (* TODO *) assert false
+      let son = fst (expr env e1) in
+      TEunop(Uamp, son),Tptr(son.expr_typ),false
   | PEunop (Uneg | Unot | Ustar as op, e1) ->
-    (* TODO *) assert false
+      let son = fst (expr env e1) in
+      TEunop(op,son),son.expr_typ,false
   | PEcall ({id = "fmt.Print"}, el) ->
     (* TODO *) TEprint [], tvoid, false
   | PEcall ({id="new"}, [{pexpr_desc=PEident {id}}]) ->
@@ -122,9 +131,12 @@ let phase1 = function
   | PDstruct { ps_name = { id = id; loc = loc }} -> (* TODO *) ()
   | PDfunction _ -> ()
 
-let sizeof = function
+
+(*A TESTER*)
+let rec sizeof = function
   | Tint | Tbool | Tstring | Tptr _ -> 8
-  | _ -> (* TODO *) assert false 
+  | Tstruct s -> Hashtbl.fold (fun _ b c -> c + sizeof (b.f_typ)) s.s_fields 0
+  | Tmany l -> List.fold_left (fun i x -> i + sizeof (x)) 0 l
 
 (* 2. declare functions and type fields *)
 let phase2 = function
