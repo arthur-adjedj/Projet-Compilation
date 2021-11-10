@@ -75,7 +75,7 @@ let rec print_pexpr (fmt : Format.formatter) e =
    | PEcall(ident,pexprs) -> 
       pp_print_string fmt ident.id;
       pp_print_char fmt '(';
-      print_pexpr_list fmt "," pexprs;
+      print_pexpr_list fmt "," pexprs  ;
       pp_print_char fmt ')'
 
    | PEident(ident) -> pp_print_string fmt ident.id 
@@ -86,8 +86,13 @@ let rec print_pexpr (fmt : Format.formatter) e =
       print_pexpr_list fmt "," pexprs1;
       pp_print_string fmt " = ";
       print_pexpr_list fmt "," pexprs2
-   | PEvars(idents,typeo,pexprs) -> () (*TODO print les PEvars*)
-
+   | PEvars(idents,typeo,pexprs) -> 
+      pp_print_string fmt "var ";
+      print_pexpr_list fmt "," (List.map (fun x -> { pexpr_desc = PEident(x);pexpr_loc = x.loc}) idents);
+      if pexprs <> [] then (
+         pp_print_string fmt " = ";
+         print_pexpr_list fmt " , " pexprs 
+      )
    | PEif(cond,yes,no) -> 
       pp_print_string fmt "if ("; 
       print_pexpr fmt cond;
@@ -138,11 +143,13 @@ let print_pfunc (fmt : Format.formatter) (f : Ast.pfunc)  =
 
 let print_pstruct fmt e = 
    pp_print_string fmt ("struct "^e.ps_name.id^" { ");
-   pp_open_vbox fmt 0;
    pp_print_cut fmt ();
+   pp_open_vbox fmt 2;
+   pp_print_string fmt "  ";
    print_pfields fmt e.ps_fields;
    pp_close_box fmt ();
-   pp_print_char fmt '}'
+   pp_print_cut fmt ();
+   pp_print_string fmt "}"
 
 let rec ast_file (fmt : Format.formatter) (dl: Ast.pdecl list) = 
    pp_open_vbox fmt 0;
@@ -160,8 +167,6 @@ let rec ast_file (fmt : Format.formatter) (dl: Ast.pdecl list) =
          pp_print_cut fmt ();
          pp_close_box fmt ();
          ast_file fmt t
-
-
 
 let rec typ fmt = function
   | Tint -> fprintf fmt "int"
