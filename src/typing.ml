@@ -12,7 +12,22 @@ exception Error of Ast.location * string
 
 let error loc e = raise (Error (loc, e))
 
-(* TODO environnement pour les types structure *)
+
+module Structs = struct
+  module Struct = struct
+    type t = pstruct
+    let compare = compare
+  end
+
+  module M = Set.Make(Struct)
+  type t = M.t
+  let empty = M.empty
+  let find = M.find
+  let all_structs = ref empty
+  let add s = all_structs := M.add s !all_structs
+  let is_defed s = M.exists (fun x -> x.ps_name.id = s.ps_name.id) !all_structs
+  
+end
 
 (* TODO environnement pour les fonctions *)
 
@@ -52,7 +67,7 @@ module Env = struct
   let all_vars = ref []
   let check_unused () =
     let check v =
-      if v.v_name <> "_" && (* TODO used *) true then error v.v_loc "unused variable" in
+      if v.v_name <> "_" && not v.v_used then error v.v_loc "unused variable" in
     List.iter check !all_vars
 
 
@@ -116,7 +131,8 @@ and expr_desc env loc = function
   | PEassign (lvl, el) ->
      (* TODO *) TEassign ([], []), tvoid, false 
   | PEreturn el ->
-     (* TODO *) TEreturn [], tvoid, true
+      let sons = List.map (fun x -> fst (expr env x)) el in
+      TEreturn sons , Tmany(List.map (fun x -> x.expr_typ) sons), true
   | PEblock el ->
      (* TODO *) TEblock [], tvoid, false
   | PEincdec (e, op) ->
@@ -127,8 +143,12 @@ and expr_desc env loc = function
 let found_main = ref false
 
 (* 1. declare structures *)
+(*A TESTER*)
 let phase1 = function
-  | PDstruct { ps_name = { id = id; loc = loc }} -> (* TODO *) ()
+  | PDstruct ({ ps_name = { id = id; loc = loc }} as s) -> 
+      if Structs.is_defed s then 
+        error loc "structure déjà définie"
+      else Structs.add s
   | PDfunction _ -> ()
 
 
