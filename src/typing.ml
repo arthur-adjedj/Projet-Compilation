@@ -14,6 +14,7 @@ let error loc e = raise (Error (loc, e))
 
 
 module Structs = struct
+
   module Struct = struct
     type t = pstruct
     let compare = compare
@@ -24,19 +25,52 @@ module Structs = struct
   let empty = M.empty
   let find = M.find
   let all_structs = ref empty
-  let add s = all_structs := M.add s !all_structs
   let is_defed s = M.exists (fun x -> x.ps_name.id = s.ps_name.id) !all_structs
-  
+  let add s = 
+    if is_defed s then 
+      error s.ps_name.loc ("struct "^s.ps_name.id^"is defined twice")
+  else
+    all_structs := M.add s !all_structs
 end
 
-(* TODO environnement pour les fonctions *)
+module Funcs = struct
+  module Func = struct
+    type t = pfunc
+    let compare = compare
+  end
+
+  module M = Set.Make(Func)
+  type t = M.t
+  let empty = M.empty
+  let find = M.find
+  let all_funcs = ref empty
+  let is_defed f = M.exists (fun x -> x.pf_name.id = f.pf_name.id) !all_funcs
+  let add f = 
+    if is_defed f then 
+      error f.pf_name.loc ("function "^f.pf_name.id^"is defined twice")
+  else
+      all_funcs := M.add f !all_funcs
+  let are_vars_unique f = 
+    let table = Hashtbl.create 15 in
+    let rec add_table = function
+      |[] -> ()
+      |h::t -> 
+        if Hashtbl.mem table (fst h).id then
+          error (fst h).loc ("the variable"^(fst h).id^"is already defined twice")
+        else (
+          Hashtbl.add table (fst h).id ();
+          add_table t
+        )
+    in try add_table f.pf_params;true with _ -> false
+end
+
 
 let rec type_type = function
   | PTident { id = "int" } -> Tint
   | PTident { id = "bool" } -> Tbool
   | PTident { id = "string" } -> Tstring
   | PTptr ty -> Tptr (type_type ty)
-  | _ -> error dummy_loc ("unknown struct ") (* TODO type structure *)
+  | PTident {id = s } -> error dummy_loc ("unknown struct ") (* TODO type structure *)
 
 let rec eq_type ty1 ty2 = match ty1, ty2 with
   | Tint, Tint | Tbool, Tbool | Tstring, Tstring -> true
@@ -95,16 +129,43 @@ and expr_desc env loc = function
       (match c with
         |Cbool _ -> Tbool
         |Cint _ -> Tint
-        |Cstring _ -> Tstring
-      )
+        |Cstring _ -> Tstring)
       , false
-  | PEbinop (op, e1, e2) ->
-    TEbinop(op,fst (expr env e1),fst (expr env e2)), Tbool,false
+  | PEbinop (op, e1, e2) -> 
+      let te1,te2 = (expr env e1),(expr env e2) in
+      (match op with
+        | Badd | Bsub | Bmul | Bdiv | Bmod -> 
+          if (fst te1).expr_typ <> Tint then
+            error e1.pexpr_loc "type int expected";
+          if (fst te2).expr_typ <> Tint then
+            error e2.pexpr_loc "type int expected";
+          TEbinop(op,fst te1, fst te2), Tint,false
+        | Beq | Bne | Blt | Ble | Bgt | Bge -> 
+          if (fst te1).expr_typ <> Tint then
+            error e1.pexpr_loc "type int expected";
+          if (fst te2).expr_typ <> Tint then
+            error e2.pexpr_loc "type int expected";
+          TEbinop(op,fst te1, fst te2), Tbool,false
+        | Band | Bor -> 
+          if (fst te1).expr_typ <> Tbool then
+            error e1.pexpr_loc "type bool expected";
+          if (fst te2).expr_typ <> Tint then
+            error e2.pexpr_loc "type bool expected";
+          TEbinop(op,fst te1, fst te2), Tbool,false)
   | PEunop (Uamp, e1) ->
       let son = fst (expr env e1) in
       TEunop(Uamp, son),Tptr(son.expr_typ),false
-  | PEunop (Uneg | Unot | Ustar as op, e1) ->
+  | PEunop (Uneg | Unot | Ustar as op, e1) -> 
       let son = fst (expr env e1) in
+      (match son.expr_typ with
+        |Tint -> if op <> Uneg then 
+          error e1.pexpr_loc "this operator can't be applied to type int" 
+        |Tbool -> if op <> Unot then 
+          error e1.pexpr_loc "this operator can't be applied to type bool" 
+        |Tptr(_) -> if op <> Ustar then 
+          error e1.pexpr_loc "this operator can't be applied to pointer" 
+        |_ -> error e1.pexpr_loc "can't apply unary operation to this expression!"
+      );
       TEunop(op,son),son.expr_typ,false
   | PEcall ({id = "fmt.Print"}, el) ->
     (* TODO *) TEprint [], tvoid, false
@@ -159,11 +220,24 @@ let rec sizeof = function
   | Tmany l -> List.fold_left (fun i x -> i + sizeof (x)) 0 l
 
 (* 2. declare functions and type fields *)
+
+let rec is_well_formed = function
+  | PTident { id = "int" } 
+  | PTident { id = "bool" } 
+  | PTident { id = "string" } -> true
+  | PTptr ty -> is_well_formed ty
+  | PTident ({id = s } as i)-> Structs.is_defed {ps_name = i;ps_fields = []}
+
+(*RAJOUTER QUELS OBJETS DE LA FONCTION SONT MAL FORMES*)
 let phase2 = function
-  | PDfunction { pf_name={id; loc}; pf_params=pl; pf_typ=tyl; } ->
-     (* TODO *) () 
-  | PDstruct { ps_name = {id}; ps_fields = fl } ->
-     (* TODO *) () 
+  | PDfunction ({ pf_name={id; loc}; pf_params=pl; pf_typ=tyl; } as f) ->
+     if List.for_all is_well_formed (List.map snd pl) && List.for_all is_well_formed tyl then 
+      Funcs.add f
+    else error loc ("types mal formés dans la fonction :"^id)
+  | PDstruct ({ ps_name = {id; loc}; ps_fields = fl } as s)->
+    if List.for_all is_well_formed (List.map snd fl) then 
+      Structs.add s
+    else error loc ("types mal formés dans la structure :"^id)
 
 (* 3. type check function bodies *)
 let decl = function
