@@ -19,7 +19,7 @@ type constant =
   | Cstring of string
 
 type ptyp =
-  | PTident of ident (* bool, int, struct id *)
+  | PTident of ident (* bool, int, string, struct id *)
   | PTptr   of ptyp
 
 type incdec = Inc | Dec (* ++ -- *)
