@@ -20,9 +20,9 @@ module Structs = struct
   let all_structs = ref empty
   let empty_struct = {ps_name = {id = "";loc = dummy_loc};ps_fields = []}
   let find = fun x -> M.find x !all_structs
-  let is_defed s = M.mem s.ps_name.id !all_structs
+  let is_defed s = M.mem s !all_structs
   let add_name s = 
-    if is_defed s then 
+    if is_defed s.ps_name.id then 
       error s.ps_name.loc ("struct "^s.ps_name.id^"is defined twice")
   else
     all_structs := M.add s.ps_name.id empty_struct !all_structs
@@ -76,9 +76,28 @@ let rec type_type = function
   | PTident { id = "string" } -> Tstring
   | PTptr ty -> Tptr (type_type ty)
   | PTident {id = s } -> 
-    
-    error dummy_loc ("unknown struct ") (* TODO type structure *)
-
+    if not (Structs.is_defed s) then
+      error dummy_loc ("unknown struct ") 
+    else 
+      let struc = Structs.find s in
+      let ns = {
+        s_name = s;
+        s_fields = 
+          let h = Hashtbl.create (List.length struc.ps_fields) in
+          let rec aux = function
+            |[] -> ()
+            |(p,t)::r -> Hashtbl.add h p.id 
+              {
+                f_name = p.id;
+                f_typ = type_type t;
+                f_ofs = 0 
+              };
+              aux r
+          in aux struc.ps_fields;
+          h
+      }
+      in Tstruct ns
+      
 let rec eq_type ty1 ty2 = match ty1, ty2 with
   | Tint, Tint | Tbool, Tbool | Tstring, Tstring -> true
   | Tstruct s1, Tstruct s2 -> s1 == s2
@@ -168,6 +187,7 @@ and expr_desc env loc = function
       );
       TEunop(op,son),son.expr_typ,false
   | PEcall ({id = "fmt.Print"}, el) ->
+      fmt_used := true;
       let l = List.map (fun x -> fst (expr env x)) el in
       TEprint l, tvoid, false
 
@@ -280,9 +300,9 @@ let rec is_well_formed = function
   | PTident { id = "bool" } 
   | PTident { id = "string" } -> true
   | PTptr ty -> is_well_formed ty
-  | PTident ({id = s } as i)-> Structs.is_defed {ps_name = i;ps_fields = []}
+  | PTident ({id = s })-> Structs.is_defed s
 
-(*TODO rajouter quels objets de f sont mal formés*)
+(*todo rajouter quels objets de f sont mal formés*)
 let phase2 = function
   | PDfunction ({ pf_name={id; loc}; pf_params=pl; pf_typ=tyl; } as f) ->
      if List.for_all is_well_formed (List.map snd pl) && List.for_all is_well_formed tyl then 
