@@ -4,29 +4,38 @@ open Lib
 open Ast
 open Tast
 
+(*A supprimer*)
+open Lexing
 let debug = ref false
 
 let dummy_loc = Lexing.dummy_pos, Lexing.dummy_pos
 
 exception Error of Ast.location * string
 
+let report_loc (b,e) =
+  let l = b.pos_lnum in
+  let fc = b.pos_cnum - b.pos_bol in
+  let lc = e.pos_cnum - b.pos_bol in
+  eprintf "File \"%s\", line %d, characters %d-%d:\n" "" l fc lc
+
+
 let error loc e = raise (Error (loc, e))
 
-module Structs = struct
+module Pstructs = struct
   module M = Map.Make(String)
   type t = pstruct M.t
 
   let empty = M.empty
-  let all_structs = ref empty
+  let all_Pstructs = ref empty
   let empty_struct = {ps_name = {id = "";loc = dummy_loc};ps_fields = []}
-  let find = fun x -> M.find x !all_structs
-  let is_defed s = M.mem s !all_structs
+  let find = fun x -> M.find x !all_Pstructs
+  let is_defed s = M.mem s !all_Pstructs
   let add_name s = 
     if is_defed s.ps_name.id then 
       error s.ps_name.loc ("struct "^s.ps_name.id^"is defined twice")
   else
-    all_structs := M.add s.ps_name.id empty_struct !all_structs
-  let add s = all_structs := M.add s.ps_name.id s !all_structs     
+    all_Pstructs := M.add s.ps_name.id empty_struct !all_Pstructs
+  let add s = all_Pstructs := M.add s.ps_name.id s !all_Pstructs     
   let are_fields_unique (s : pstruct) = 
     let table = Hashtbl.create 15 in
     let rec add_table = function
@@ -40,6 +49,18 @@ module Structs = struct
         )
     in try add_table s.ps_fields;true with _ -> false  
 end
+
+module Structs = struct
+  module M = Map.Make(String)
+  type t = structure M.t
+
+  let (empty : t) = M.empty
+  let all_structs = ref empty
+  let find = fun x -> M.find x !all_structs
+  let add s = all_structs := M.add s.s_name s !all_structs     
+
+end
+
 
 
 (*all_funcs contient une map qui à un string associe la pfunc associée*)
@@ -69,38 +90,42 @@ module Funcs = struct
     in try add_table f.pf_params;true with _ -> false
 end
 
+let rec pstruct_to_struct s = if not (Pstructs.is_defed s) then
+  error dummy_loc ("unknown struct ") 
+else 
+  let struc = Pstructs.find s in
+  let ns = {
+    s_name = s;
+    s_fields = 
+      let h = Hashtbl.create (List.length struc.ps_fields) in
+      let rec aux = function
+        |[] -> ()
+        |(p,t)::r -> Hashtbl.add h p.id 
+          {
+            f_name = p.id;
+            f_typ = (match t with
+                |PTident {id} when id = s-> (*à l'aide...*)(Tstruct uwu)
+                |_ -> type_type t);
+            f_ofs = 0 
+          };
+          aux r
+      in aux struc.ps_fields;
+      h
+  } 
+  and uwu = ns
+  in ns
 
-let rec type_type = function
+and type_type = function
   | PTident { id = "int" } -> Tint
   | PTident { id = "bool" } -> Tbool
   | PTident { id = "string" } -> Tstring
   | PTptr ty -> Tptr (type_type ty)
   | PTident {id = s } -> 
-    if not (Structs.is_defed s) then
-      error dummy_loc ("unknown struct ") 
-    else 
-      let struc = Structs.find s in
-      let ns = {
-        s_name = s;
-        s_fields = 
-          let h = Hashtbl.create (List.length struc.ps_fields) in
-          let rec aux = function
-            |[] -> ()
-            |(p,t)::r -> Hashtbl.add h p.id 
-              {
-                f_name = p.id;
-                f_typ = type_type t;
-                f_ofs = 0 
-              };
-              aux r
-          in aux struc.ps_fields;
-          h
-      }
-      in Tstruct ns
+    let ns = pstruct_to_struct s in Tstruct ns
       
 let rec eq_type ty1 ty2 = match ty1, ty2 with
   | Tint, Tint | Tbool, Tbool | Tstring, Tstring -> true
-  | Tstruct s1, Tstruct s2 -> s1 == s2
+  | Tstruct s1, Tstruct s2 -> s1.s_name = s2.s_name
   | Tptr ty1, Tptr ty2 -> eq_type ty1 ty2
   | Tmany man1, Tmany man2 -> List.filter (fun x -> not (List.mem x man1 )) man2 = []
   | _ -> false
@@ -126,7 +151,7 @@ module Env = struct
   let all_vars = ref []
   let check_unused () =
     let check v =
-      if v.v_name <> "_" && not v.v_used then error v.v_loc "unused variable" in
+      if v.v_name <> "_" && not v.v_used then error v.v_loc ("unused variable "^v.v_name) in
     List.iter check !all_vars
 
 
@@ -142,11 +167,23 @@ let tvoid = Tmany []
 let make d ty = { expr_desc = d; expr_typ = ty }
 let stmt d = make d tvoid
 
+let rec is_l_value e = match e.expr_desc with
+  |TEident(_) -> true
+  |TEdot(el,_) -> is_l_value el
+  |TEunop(Ustar,el) -> (
+    try
+      (let Tptr(_) = el.expr_typ in ());
+       el.expr_desc <> TEnil
+    with _ -> false)
+  |_ -> false
+
 let rec expr env e =
  let e, ty, rt = expr_desc env e.pexpr_loc e.pexpr_desc in
-  { expr_desc = e; expr_typ = ty }, rt
+  make e ty, rt
 
-and expr_desc env loc = function
+and expr_desc env loc = 
+  report_loc loc;
+  function
   | PEskip ->
      TEskip, tvoid, false
   | PEconstant c ->
@@ -187,66 +224,91 @@ and expr_desc env loc = function
       );
       TEunop(op,son),son.expr_typ,false
   | PEcall ({id = "fmt.Print"}, el) ->
+      if not !fmt_imported then 
+        error loc "fmt used but not imported";
       fmt_used := true;
       let l = List.map (fun x -> fst (expr env x)) el in
       TEprint l, tvoid, false
-
-  | PEcall ({id="new"}, [{pexpr_desc=PEident {id}}]) ->
-     let ty = match id with
-       | "int" -> Tint | "bool" -> Tbool | "string" -> Tstring
-       | _ -> (* TODO *) error loc ("no such type " ^ id) in
-     TEnew ty, Tptr ty, false
-
+  | PEcall ({id="new"}, [{pexpr_desc=PEident {id;loc}}])->
+      let ty = match id with
+        | "int" -> Tint | "bool" -> Tbool | "string" -> Tstring
+        | _ -> 
+          (*TODO fixer les bugs ici (100% yen a j'ai fait nimp)*)
+          if Pstructs.is_defed id then 
+            type_type (PTident{id;loc})
+        else error loc ("no such type " ^ id) in
+      TEnew ty, Tptr ty, false
   | PEcall ({id="new"}, _) ->
-     error loc "new expects a type"
+      error loc "new expects a type"
   | PEcall (id, el) ->
-    (*tests possiblement nécessaires 
-    pour vérifier le bon typage des fonctions*)
-    let af = Funcs.find id.id in
-    let f = 
-      {fn_name = af.pf_name.id;
-      fn_params = List.map 
-        (fun (p,t) ->
-           new_var 
-            p.id 
-            p.loc 
-            (type_type t)
-        ) af.pf_params;
-      fn_typ =  List.map type_type af.pf_typ;
-      } in 
-      let exprs = List.map (fun x -> fst (expr env x)) el in
+      (*tests possiblement nécessaires 
+      pour vérifier le bon typage des fonctions*)
+      let af = Funcs.find id.id in
+      let f = 
+        {fn_name = af.pf_name.id;
+        fn_params = List.map 
+          (fun (p,t) ->
+            new_var 
+              p.id 
+              p.loc 
+              (type_type t)
+          ) af.pf_params;
+        fn_typ =  List.map type_type af.pf_typ;
+        } in 
+        let exprs = List.map (fun x -> fst (expr env x)) el in
       TEcall(f,exprs),Tmany(f.fn_typ),false
   | PEfor (e, b) ->
-     (* TODO *) assert false
+      let (ne,r1) = expr env e
+      and (nb,r2) =  expr env b in
+      if ne.expr_typ <> Tbool then
+        error loc "type bool expected"
+      else TEfor(ne,nb),tvoid,false
   | PEif (e1, e2, e3) ->
-    let returns = ref false in
-    let ne1,b1 = expr env e1 
-    and ne2,b2 = expr env e2 
-    and ne3,b3 = expr env e3 in
-    if ne1.expr_typ <> Tbool then
-      error loc "type bool expected"
-    else
-    if b2 then (
-      if not b3 then 
-        error loc "expected a return")
-      else returns := true;
-    TEif(ne1,ne2,ne3),
-    (if !returns then ne1.expr_typ else tvoid),
-    !returns
+      let returns = ref false in
+      let ne1,_ = expr env e1 
+      and ne2,b2 = expr env e2 
+      and ne3,b3 = expr env e3 in
+      if ne1.expr_typ <> Tbool then
+        error loc "type bool expected"
+      else
+      if b2 then (
+        if not b3 then 
+          error e3.pexpr_loc "expected a return")
+        else returns := true;
+      TEif(ne1,ne2,ne3),
+      (if !returns then ne1.expr_typ else tvoid),
+      !returns
   | PEnil -> TEnil ,tvoid,false 
   | PEident {id=id} ->
-     (* TODO *) (try let v = Env.find id env in TEident v, v.v_typ, false
+     (try 
+        let v = Env.find id !env in
+         v.v_used <- true;
+         TEident v, v.v_typ, false
       with Not_found -> error loc ("unbound variable " ^ id))
   | PEdot (e, id) ->
-    let (ne,r) = expr env e in
-
-     (* TODO *) assert false
+      let (ne,r) = expr env e in
+      let s = match ne.expr_typ with
+        |Tstruct a 
+        |Tptr(Tstruct a)-> pstruct_to_struct a.s_name
+        |_ -> error loc "this type doesn't have any method"
+      in 
+      if not (Hashtbl.mem s.s_fields id.id) then
+        error loc ("structure "^s.s_name^" doesn't have method "^id.id)
+      else 
+        let field = Hashtbl.find s.s_fields id.id in
+        TEdot(ne,field),field.f_typ,false
   | PEassign (lvl, el) ->
-     (* TODO *) TEassign ([], []), tvoid, false 
+      let nlvl = List.map (fun x -> fst (expr env x)) lvl
+      and nel = List.map (fun x -> fst (expr env x)) el in
+      if not (List.for_all is_l_value nlvl) then
+        error loc "ill-formed l-value"
+      else 
+      TEassign (nlvl, nel), tvoid, false 
   | PEreturn el ->
       let sons = List.map (fun x -> fst (expr env x)) el in
-      TEreturn sons , Tmany(List.map (fun x -> x.expr_typ) sons), true
+      TEreturn sons , tvoid, true
   | PEblock el ->
+    let curenv = ref !env in
     let ret_type = ref tvoid in
     let has_a_return = ref false in
     let rec aux = function
@@ -265,15 +327,36 @@ and expr_desc env loc = function
         aux t in
     let sons = List.map (fun x -> expr env x) el in
     aux sons;
+    env := !curenv;
     TEblock (List.map fst sons), !ret_type, !has_a_return
-  | PEincdec (e, op) ->
+  | PEincdec(e, op) ->
     let (new_e,_) = expr env e in
     if new_e.expr_typ <> Tint then
       error e.pexpr_loc "type int expected"
     else
       TEincdec(new_e,op),Tint,false
-  | PEvars _ ->
-     (* TODO *) assert false 
+  | PEvars(ids,ptyps,pexprs) ->
+    match ptyps with
+    |None -> 
+      if pexprs = [] then
+        error loc "empty declarations must be explicitly typed"
+      else let types = List.map (fun x -> (fst (expr env x)).expr_typ) pexprs in
+      TEvars(List.map2 
+      (fun x y -> 
+        let next = Env.var x.id x.loc y !env in
+        env := fst next;
+        snd next) ids types),Tmany(types),false
+    |Some pt ->
+      let p = type_type pt in 
+      TEvars(
+        List.map 
+          (fun x -> 
+            let next = Env.var x.id x.loc p !env in
+            env := fst next;
+            snd next) ids),
+        tvoid,false
+    
+
 
 let found_main = ref false
 
@@ -281,9 +364,9 @@ let found_main = ref false
 (*A TESTER*)
 let phase1 = function
   | PDstruct ({ ps_name = { id = id; loc = loc }} as s) -> 
-      if Structs.is_defed s then 
+      if Pstructs.is_defed id then 
         error loc "structure déjà définie"
-      else Structs.add_name s
+      else Pstructs.add_name s
   | PDfunction _ -> ()
 
 
@@ -300,40 +383,45 @@ let rec is_well_formed = function
   | PTident { id = "bool" } 
   | PTident { id = "string" } -> true
   | PTptr ty -> is_well_formed ty
-  | PTident ({id = s })-> Structs.is_defed s
+  | PTident ({id = s })-> Pstructs.is_defed s
 
 (*todo rajouter quels objets de f sont mal formés*)
 let phase2 = function
   | PDfunction ({ pf_name={id; loc}; pf_params=pl; pf_typ=tyl; } as f) ->
+    if id="main" then found_main := true;
      if List.for_all is_well_formed (List.map snd pl) && List.for_all is_well_formed tyl then 
       Funcs.add f
     else error loc ("types mal formés dans la fonction :"^id)
   | PDstruct ({ ps_name = {id; loc}; ps_fields = fl } as s)->
     if not ( List.for_all is_well_formed (List.map snd fl)) then 
       error loc ("types mal formés dans la structure :"^id);
-    if not (Structs.are_fields_unique s) then
-      error loc "les champs ne sont pas uniques";
-    Structs.add s
+    if not (Pstructs.are_fields_unique s) then
+      error loc ("les champs ne sont pas uniques dans "^s.ps_name.id);
+    Pstructs.add s
 
 
 (* 3. type check function bodies *)
 let decl = function
-  | PDfunction { pf_name={id; loc}; pf_body = e; pf_typ=tyl } ->
+  | PDfunction { pf_name={id; loc}; pf_params = params;pf_body = e; pf_typ=tyl } ->
     (* TODO check name and type *) 
     let f = { fn_name = id; fn_params = []; fn_typ = []} in
-    let e, rt = expr Env.empty e in
+    let env = ref Env.empty in
+    List.iter (fun (p,t) -> env := fst (Env.var p.id p.loc (type_type t) !env)) params ;
+    let e, rt = expr env e in
     TDfunction (f, e)
   | PDstruct {ps_name={id}} ->
+
     (* TODO *) let s = { s_name = id; s_fields = Hashtbl.create 5 } in
      TDstruct s
 
+
 let file ~debug:b (imp, dl) =
   debug := b;
-  (* fmt_imported := imp; *)
+  fmt_imported := imp; 
   List.iter phase1 dl;
   List.iter phase2 dl;
-  if not !found_main then error dummy_loc "missing method main";
+  if not !found_main then error dummy_loc "main not found";
   let dl = List.map decl dl in
-  Env.check_unused (); (* TODO variables non utilisees *)
+  Env.check_unused (); 
   if imp && not !fmt_used then error dummy_loc "fmt imported but not used";
   dl

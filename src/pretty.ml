@@ -26,11 +26,10 @@ let unop = function
 let print_constant fmt = function
    |Cbool(x) -> pp_print_string fmt (string_of_bool x)
    |Cint(x) -> pp_print_string fmt  (Int64.to_string x)
-   |Cstring(x) -> pp_print_string fmt ("\""^x^"\"")
+   |Cstring(x) -> pp_print_string fmt ("\""^(String.escaped x)^"\"")
 
 let rec print_ptyp fmt = function
    |PTident(ident) -> 
-      if ident.id <> "bool" && ident.id <> "int" then
       pp_print_string fmt ident.id
    |PTptr(ptyp) ->
       pp_print_char fmt '*';
@@ -77,8 +76,7 @@ let rec print_pexpr (fmt : Format.formatter) e =
       pp_print_char fmt '(';
       print_pexpr_list fmt "," pexprs  ;
       pp_print_char fmt ')'
-
-   | PEident(ident) -> pp_print_string fmt ident.id 
+   | PEident(ident) -> pp_print_string fmt ident.id
    | PEdot(e1,ident) -> 
       print_pexpr fmt e1;
       pp_print_string fmt ("."^ident.id);
@@ -91,32 +89,31 @@ let rec print_pexpr (fmt : Format.formatter) e =
       print_pexpr_list fmt "," (List.map (fun x -> { pexpr_desc = PEident(x);pexpr_loc = x.loc}) idents);
       if pexprs <> [] then (
          pp_print_string fmt " = ";
-         print_pexpr_list fmt " , " pexprs 
-      )
+         print_pexpr_list fmt "," pexprs )
    | PEif(cond,yes,no) -> 
       pp_print_string fmt "if ("; 
       print_pexpr fmt cond;
       pp_print_string fmt ")";
       print_pexpr fmt yes;
-      pp_print_string fmt "else";
+      pp_print_string fmt " else";
       print_pexpr fmt no     
    | PEreturn(pexprs) -> 
+      pp_print_string fmt "return ";
       print_pexpr_list fmt "," pexprs
-   | PEblock(pexprs) ->
-      pp_print_string fmt "{";
+   | PEblock(pexprs) -> 
       pp_print_cut fmt ();
       pp_open_vbox fmt 2;
       pp_print_string fmt "  ";
       print_pexpr_list ~newline:true fmt "" pexprs;
       pp_close_box fmt ();
       pp_print_cut fmt ();
-      pp_print_string fmt "}";
    | PEfor(loop,e1) -> 
-      pp_print_string fmt "for (";
+      pp_print_string fmt "while (";
       print_pexpr fmt loop;
-      pp_print_string fmt ") ";
-      print_pexpr fmt e1
-   
+      pp_print_string fmt ") {";
+      print_pexpr fmt e1;
+      pp_print_string fmt "}"
+
    | PEincdec(e1,incdec) -> 
       print_pexpr fmt e1;
       pp_print_string fmt
@@ -138,8 +135,14 @@ let print_pfunc (fmt : Format.formatter) (f : Ast.pfunc)  =
    pp_print_string fmt f.pf_name.id;
    pp_print_char fmt '(';
    print_pparam fmt f.pf_params;
-   pp_print_string fmt ") ";
-   print_pexpr fmt f.pf_body
+   pp_print_string fmt ")";
+   List.iter 
+      (pp_print_string fmt " ";
+       print_ptyp std_formatter) f.pf_typ;
+   pp_print_string fmt "{";
+   print_pexpr fmt f.pf_body;
+   pp_print_string fmt "}"
+
 
 let print_pstruct fmt e = 
    pp_print_string fmt ("struct "^e.ps_name.id^" { ");
