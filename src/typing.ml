@@ -386,7 +386,7 @@ let found_main = ref false
 let phase1 = function
   | PDstruct ({ ps_name = { id = id; loc = loc }} as s) -> 
       if Pstructs.is_defed id then 
-        error loc "structure déjà définie"
+        error loc ("structure"^"defined twice")
       else Pstructs.add_name s
   | PDfunction _ -> ()
 
@@ -412,12 +412,12 @@ let phase2 = function
     if id="main" then found_main := true;
      if List.for_all is_well_formed (List.map snd pl) && List.for_all is_well_formed tyl then 
       Funcs.add f
-    else error loc ("types mal formés dans la fonction :"^id)
+    else error loc ("fonction :"^id^"is ill-formed")
   | PDstruct ({ ps_name = {id; loc}; ps_fields = fl } as s)->
     if not ( List.for_all is_well_formed (List.map snd fl)) then 
-      error loc ("types mal formés dans la structure :"^id);
+      error loc ("ill-formed types in structure :"^id);
     if not (Pstructs.are_fields_unique s) then
-      error loc ("les champs ne sont pas uniques dans "^s.ps_name.id);
+      error loc ("duplicate attributes in structure "^s.ps_name.id);
     Pstructs.add s
 
 
