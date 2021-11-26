@@ -90,30 +90,32 @@ module Funcs = struct
     in try add_table f.pf_params;true with _ -> false
 end
 
+
+let rec points_to_himself ?f:(first = false) ids = function
+  |PTident {id} when id = ids-> if first then error dummy_loc "ill-formed structure" else true
+  |PTptr(a) -> points_to_himself ids a
+  |_ -> false
+
 let rec pstruct_to_struct s = if not (Pstructs.is_defed s) then
   error dummy_loc ("unknown struct ") 
 else 
   let struc = Pstructs.find s in
   let ns = {
     s_name = s;
-    s_fields = 
-      let h = Hashtbl.create (List.length struc.ps_fields) in
-      let rec aux = function
-        |[] -> ()
-        |(p,t)::r -> Hashtbl.add h p.id 
-          {
-            f_name = p.id;
-            f_typ = (match t with
-                |PTident {id} when id = s-> (*à l'aide...*)(Tstruct uwu)
-                |_ -> type_type t);
-            f_ofs = 0 
-          };
-          aux r
-      in aux struc.ps_fields;
-      h
-  } 
-  and uwu = ns
-  in ns
+    s_fields = Hashtbl.create (List.length struc.ps_fields)
+  } in
+  let rec aux = function
+  |[] -> ()
+  |(p,t)::r -> Hashtbl.add ns.s_fields p.id 
+    {
+      f_name = p.id;
+      f_typ = if points_to_himself ~f:true s t then (Tstruct ns)
+              else type_type t;
+      f_ofs = 0 
+    };
+    aux r
+  in aux struc.ps_fields;
+  ns
 
 and type_type = function
   | PTident { id = "int" } -> Tint
@@ -163,6 +165,14 @@ module Env = struct
   (* TODO type () et vecteur de types *)
 end
 
+let l_to_typ = function
+  |[x] -> x
+  |_ as a -> Tmany a
+
+let typ_to_l = function
+  |Tmany a -> a
+  |_ as a -> [a]
+
 let tvoid = Tmany []
 let make d ty = { expr_desc = d; expr_typ = ty }
 let stmt d = make d tvoid
@@ -177,13 +187,19 @@ let rec is_l_value e = match e.expr_desc with
     with _ -> false)
   |_ -> false
 
+ let rec flatten = function
+  |[] -> []
+  |(Tmany a)::t -> (flatten a)@(flatten t)
+  |h::t -> h::(flatten t)
+  
+
+let ret_type = ref tvoid
+
 let rec expr env e =
  let e, ty, rt = expr_desc env e.pexpr_loc e.pexpr_desc in
   make e ty, rt
 
-and expr_desc env loc = 
-  report_loc loc;
-  function
+and expr_desc env loc = function
   | PEskip ->
      TEskip, tvoid, false
   | PEconstant c ->
@@ -256,7 +272,8 @@ and expr_desc env loc =
         fn_typ =  List.map type_type af.pf_typ;
         } in 
         let exprs = List.map (fun x -> fst (expr env x)) el in
-      TEcall(f,exprs),Tmany(f.fn_typ),false
+        let ty = l_to_typ f.fn_typ in
+      TEcall(f,exprs),ty,false
   | PEfor (e, b) ->
       let (ne,r1) = expr env e
       and (nb,r2) =  expr env b in
@@ -271,10 +288,8 @@ and expr_desc env loc =
       if ne1.expr_typ <> Tbool then
         error loc "type bool expected"
       else
-      if b2 then (
-        if not b3 then 
-          error e3.pexpr_loc "expected a return")
-        else returns := true;
+      returns := b2 && b3;
+      print_bool !returns;
       TEif(ne1,ne2,ne3),
       (if !returns then ne1.expr_typ else tvoid),
       !returns
@@ -305,36 +320,40 @@ and expr_desc env loc =
       else 
       TEassign (nlvl, nel), tvoid, false 
   | PEreturn el ->
-      let sons = List.map (fun x -> fst (expr env x)) el in
+      let sons = List.map (fun x -> fst (expr env x))  el in
+      let ret = l_to_typ (List.map (fun x -> x.expr_typ) sons) in
+      if ret <> !ret_type then
+        error loc "wrong return type";
       TEreturn sons , tvoid, true
   | PEblock el ->
-    let curenv = ref !env in
-    let ret_type = ref tvoid in
+    let curenv = !env in
     let has_a_return = ref false in
     let rec aux = function
-      |[] -> error loc "block can't be empty !"
+      |[] -> ()
       |[(e,true)] -> has_a_return := true
       |[(_,false)] -> 
-        if !has_a_return then error loc "return at the end of block expected"
-        else ()
+        if !has_a_return then error loc "return at the end of block expected";
       |(e,b)::t -> 
         if b then (
           has_a_return := true;
           if !ret_type <> tvoid && e.expr_typ <> !ret_type then
             error loc "wrong type in block return";
           ret_type := e.expr_typ
-        );
-        aux t in
+        )
+        else aux t
+        in
     let sons = List.map (fun x -> expr env x) el in
+    print_int (List.length sons);
     aux sons;
-    env := !curenv;
-    TEblock (List.map fst sons), !ret_type, !has_a_return
+    env := curenv;
+    TEblock (List.map fst sons), tvoid, !has_a_return
   | PEincdec(e, op) ->
-    let (new_e,_) = expr env e in
-    if new_e.expr_typ <> Tint then
-      error e.pexpr_loc "type int expected"
-    else
-      TEincdec(new_e,op),Tint,false
+    let (ne,_) = expr env e in
+    if ne.expr_typ <> Tint then
+      error e.pexpr_loc "type int expected";
+    if not (is_l_value ne) then
+      error e.pexpr_loc "l-value expected";
+    TEincdec(ne,op),Tint,false
   | PEvars(ids,ptyps,pexprs) ->
     match ptyps with
     |None -> 
@@ -345,7 +364,7 @@ and expr_desc env loc =
       (fun x y -> 
         let next = Env.var x.id x.loc y !env in
         env := fst next;
-        snd next) ids types),Tmany(types),false
+        snd next) ids (flatten types)),Tmany(types),false
     |Some pt ->
       let p = type_type pt in 
       TEvars(
@@ -403,15 +422,17 @@ let phase2 = function
 (* 3. type check function bodies *)
 let decl = function
   | PDfunction { pf_name={id; loc}; pf_params = params;pf_body = e; pf_typ=tyl } ->
+    let return_type = List.map type_type tyl in
+    ret_type := l_to_typ return_type;
     (* TODO check name and type *) 
     let f = { fn_name = id; fn_params = []; fn_typ = []} in
     let env = ref Env.empty in
     List.iter (fun (p,t) -> env := fst (Env.var p.id p.loc (type_type t) !env)) params ;
     let e, rt = expr env e in
+    if !ret_type <> tvoid && not rt then error loc "return expected";
     TDfunction (f, e)
   | PDstruct {ps_name={id}} ->
-
-    (* TODO *) let s = { s_name = id; s_fields = Hashtbl.create 5 } in
+     let s = { s_name = id; s_fields = Hashtbl.create 5 } in
      TDstruct s
 
 

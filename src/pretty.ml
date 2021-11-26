@@ -103,9 +103,11 @@ let rec print_pexpr (fmt : Format.formatter) e =
    | PEblock(pexprs) -> 
       pp_print_cut fmt ();
       pp_open_vbox fmt 2;
+      pp_print_string fmt "{";
       pp_print_string fmt "  ";
       print_pexpr_list ~newline:true fmt "" pexprs;
       pp_close_box fmt ();
+      pp_print_string fmt "}";
       pp_print_cut fmt ();
    | PEfor(loop,e1) -> 
       pp_print_string fmt "while (";
@@ -136,9 +138,11 @@ let print_pfunc (fmt : Format.formatter) (f : Ast.pfunc)  =
    pp_print_char fmt '(';
    print_pparam fmt f.pf_params;
    pp_print_string fmt ")";
+   pp_print_string fmt " ";
    List.iter 
-      (pp_print_string fmt " ";
-       print_ptyp std_formatter) f.pf_typ;
+      (fun x ->
+       print_ptyp std_formatter x;
+       pp_print_string fmt " ") f.pf_typ;
    pp_print_string fmt "{";
    print_pexpr fmt f.pf_body;
    pp_print_string fmt "}"
