@@ -359,11 +359,14 @@ and expr_desc env loc = function
       if pexprs = [] then
         error loc "empty declarations must be explicitly typed"
       else let types = List.map (fun x -> (fst (expr env x)).expr_typ) pexprs in
-      TEvars(List.map2 
-      (fun x y -> 
-        let next = Env.var x.id x.loc y !env in
-        env := fst next;
-        snd next) ids (flatten types)),Tmany(types),false
+      (try 
+        let vars = List.map2 
+        (fun x y -> 
+          let next = Env.var x.id x.loc y !env in
+          env := fst next;
+          snd next) ids (flatten types) in
+        TEvars(vars),Tmany(types),false
+        with (Invalid_argument _) -> error loc "incorrect number of elements returned" )
     |Some pt ->
       let p = type_type pt in 
       TEvars(
