@@ -249,7 +249,6 @@ and expr_desc env loc = function
       let ty = match id with
         | "int" -> Tint | "bool" -> Tbool | "string" -> Tstring
         | _ -> 
-          (*TODO fixer les bugs ici (100% yen a j'ai fait nimp)*)
           if Pstructs.is_defed id then 
             type_type (PTident{id;loc})
         else error loc ("no such type " ^ id) in
@@ -424,7 +423,6 @@ let decl = function
   | PDfunction { pf_name={id; loc}; pf_params = params;pf_body = e; pf_typ=tyl } ->
     let return_type = List.map type_type tyl in
     ret_type := l_to_typ return_type;
-    (* TODO check name and type *) 
     let f = { fn_name = id; fn_params = []; fn_typ = []} in
     let env = ref Env.empty in
     List.iter (fun (p,t) -> env := fst (Env.var p.id p.loc (type_type t) !env)) params ;
