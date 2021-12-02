@@ -13,6 +13,6 @@ func foo(x int) (int, int) {
 }
 
 func main() {
-	x := foo(fact(20))
+	x,y := foo(fact(20))
 	fmt.Print(x+y+1, "\n");
 }
