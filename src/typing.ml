@@ -26,28 +26,32 @@ module Pstructs = struct
   type t = pstruct M.t
 
   let empty = M.empty
-  let all_Pstructs = ref empty
+  let all_pstructs = ref empty
   let empty_struct = {ps_name = {id = "";loc = dummy_loc};ps_fields = []}
-  let find = fun x -> M.find x !all_Pstructs
-  let is_defed s = M.mem s !all_Pstructs
+  let find = fun x -> M.find x !all_pstructs
+  let is_defed s = M.mem s !all_pstructs
   let add_name s = 
     if is_defed s.ps_name.id then 
-      error s.ps_name.loc ("struct "^s.ps_name.id^"is defined twice")
+      error s.ps_name.loc ("struct "^s.ps_name.id^" is defined twice")
   else
-    all_Pstructs := M.add s.ps_name.id empty_struct !all_Pstructs
-  let add s = all_Pstructs := M.add s.ps_name.id s !all_Pstructs     
+    all_pstructs := M.add s.ps_name.id empty_struct !all_pstructs
+  let add s = all_pstructs := M.add s.ps_name.id s !all_pstructs     
   let are_fields_unique (s : pstruct) = 
     let table = Hashtbl.create 15 in
     let rec add_table = function
       |[] -> ()
       |h::t -> 
         if Hashtbl.mem table (fst h).id then
-          error (fst h).loc ("the field"^(fst h).id^"is already defined twice")
+          error (fst h).loc ("the field "^(fst h).id^" is already defined twice")
         else (
           Hashtbl.add table (fst h).id ();
           add_table t
         )
     in try add_table s.ps_fields;true with _ -> false  
+
+
+    let iter f = M.iter f !all_pstructs
+
 end
 
 module Structs = struct
@@ -58,6 +62,9 @@ module Structs = struct
   let all_structs = ref empty
   let find = fun x -> M.find x !all_structs
   let add s = all_structs := M.add s.s_name s !all_structs     
+  let iter f = M.iter f !all_structs
+
+  let card () = M.cardinal !all_structs
 
 end
 
@@ -73,7 +80,7 @@ module Funcs = struct
   let is_defed f = M.mem f.pf_name.id !all_funcs
   let add f = 
     if is_defed f then 
-      error f.pf_name.loc ("function "^f.pf_name.id^"is defined twice")
+      error f.pf_name.loc ("function "^f.pf_name.id^" is defined twice")
   else
       all_funcs := M.add f.pf_name.id f !all_funcs
   let are_vars_unique f = 
@@ -82,7 +89,7 @@ module Funcs = struct
       |[] -> ()
       |h::t -> 
         if Hashtbl.mem table (fst h).id then
-          error (fst h).loc ("the variable"^(fst h).id^"is already defined twice")
+          error (fst h).loc ("the variable "^(fst h).id^" is already defined twice")
         else (
           Hashtbl.add table (fst h).id ();
           add_table t
@@ -91,39 +98,40 @@ module Funcs = struct
 end
 
 
-let rec points_to_himself ?f:(first = false) ids = function
-  |PTident {id} when id = ids-> if first then error dummy_loc "ill-formed structure" else true
-  |PTptr(a) -> points_to_himself ids a
-  |_ -> false
-
-let rec pstruct_to_struct s = if not (Pstructs.is_defed s) then
-  error dummy_loc ("unknown struct ") 
-else 
+let rec pstruct_to_struct s = 
+  try Structs.find s with _ ->
+  if not (Pstructs.is_defed s) then
+    error dummy_loc ("unknown struct "); 
   let struc = Pstructs.find s in
+  let n = List.length struc.ps_fields in
+  print_string ("pstruct "^s^" : ");
+  print_int n;
+  print_newline ();
   let ns = {
     s_name = s;
-    s_fields = Hashtbl.create (List.length struc.ps_fields)
+    s_fields = Hashtbl.create n
   } in
+  Structs.add ns;
+  let h = (Structs.find s).s_fields in
   let rec aux = function
   |[] -> ()
-  |(p,t)::r -> Hashtbl.add ns.s_fields p.id 
+  |(p,t)::r -> Hashtbl.add h p.id 
     {
       f_name = p.id;
-      f_typ = if points_to_himself ~f:true s t then (Tstruct ns)
-              else type_type t;
+      f_typ =  type_type t;
       f_ofs = 0 
     };
     aux r
   in aux struc.ps_fields;
   ns
 
-and type_type = function
+and type_type a = 
+  match a with
   | PTident { id = "int" } -> Tint
   | PTident { id = "bool" } -> Tbool
   | PTident { id = "string" } -> Tstring
   | PTptr ty -> Tptr (type_type ty)
-  | PTident {id = s } -> 
-    let ns = pstruct_to_struct s in Tstruct ns
+  | PTident {id = s } -> Tstruct (pstruct_to_struct s)
   
 let rec typstr = function
   | Tint -> "int"
@@ -131,7 +139,9 @@ let rec typstr = function
   | Tstring -> "string"
   | Tstruct s -> s.s_name
   | Tptr ty -> "*"^(typstr ty)
-  | Tmany l -> ""  (*A FAIRE*) 
+  | Tmany [x] -> typstr x
+  | Tmany (h::t) -> (typstr h)^" , "^typstr (Tmany t)
+  | Tmany [] -> "" 
 
 let rec eq_type ty1 ty2 = match ty1, ty2 with
   | Tint, Tint | Tbool, Tbool | Tstring, Tstring -> true
@@ -141,6 +151,31 @@ let rec eq_type ty1 ty2 = match ty1, ty2 with
   | _ -> false
     (* TODO autres types *)
 
+
+
+let is_recursive (s : structure) =
+  let n = s.s_name in
+  print_string (n^" : ");
+  print_int (Hashtbl.length s.s_fields);
+  print_string (" : ");
+  let res = ref false in
+  let rec aux f = 
+    print_endline f.f_name;
+    match f.f_typ with
+      |Tstruct s' ->  
+        if s'.s_name = n then res := true
+        else (
+          print_string ("("^s'.s_name^" : ");
+          print_int (Hashtbl.length s'.s_fields);
+          print_string (" ) ");
+          Hashtbl.iter (fun _ -> fun x -> aux x) s'.s_fields)
+      |_ -> ()
+    in Hashtbl.iter (fun _ -> fun x -> aux x) s.s_fields;
+    print_bool !res;
+    print_newline ();
+    !res
+
+    
 let fmt_used = ref false
 let fmt_imported = ref false
 
@@ -211,7 +246,8 @@ let correct_assign nlvl nel =
   let rec aux = function
     |[],[] -> true
     |Tptr(_)::t1,Tptr(tvoid)::t2 -> aux (t1,t2)
-    |a::t1,b::t2 -> eq_type a b && aux (t1,t2)
+    |Tptr(a)::t1,b::t2 ->(* (print_endline ("fst "^(typstr (Tptr a))^" : "^(typstr b))); *) (eq_type a b || eq_type (Tptr a) b) && aux (t1,t2) 
+    |a::t1,b::t2 -> (*(print_endline ("snd "^(typstr a)^" : "^(typstr b)));*) eq_type a b && aux (t1,t2) 
     |_ -> false
 in aux (f1,f2)
 
@@ -414,7 +450,7 @@ let found_main = ref false
 let phase1 = function
   | PDstruct ({ ps_name = { id = id; loc = loc }} as s) -> 
       if Pstructs.is_defed id then 
-        error loc ("structure"^id^"defined twice")
+        error loc ("structure "^id^" defined twice")
       else Pstructs.add_name s
   | PDfunction _ -> ()
 
@@ -438,12 +474,14 @@ let rec is_well_formed = function
   let phase2 = function
   | PDfunction ({ pf_name={id; loc}; pf_params=pl; pf_typ=tyl; } as f) ->
     if id="main" then (
+     if pl <> [] then error loc "function main can't have any argument";
      if tyl <> [] then error loc "function main must have no return";
      found_main := true);
      if List.for_all is_well_formed (List.map snd pl) && List.for_all is_well_formed tyl then 
       Funcs.add f
     else error loc ("fonction "^id^" is ill-formed")
   | PDstruct ({ ps_name = {id; loc}; ps_fields = fl } as s)->
+    print_endline ("pstruct "^id^" added to Pstructs");
     if not (List.for_all is_well_formed (List.map snd fl)) then 
       error loc ("ill-formed types in structure :"^id);
     if not (Pstructs.are_fields_unique s) then
@@ -472,8 +510,11 @@ let file ~debug:b (imp, dl) =
   fmt_imported := imp; 
   List.iter phase1 dl;
   List.iter phase2 dl;
+  Pstructs.iter (fun st -> fun _ -> Structs.add (pstruct_to_struct st));
   if not !found_main then error dummy_loc "main not found";
   let dl = List.map decl dl in
+  print_int (Structs.card ());
+  Structs.iter (fun _ -> fun s -> if is_recursive s then error dummy_loc ("structure "^s.s_name^" is recursive") else ());
   Env.check_unused (); 
   if imp && not !fmt_used then error dummy_loc "fmt imported but not used";
   dl
