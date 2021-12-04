@@ -104,9 +104,6 @@ let rec pstruct_to_struct s =
     error dummy_loc ("unknown struct "); 
   let struc = Pstructs.find s in
   let n = List.length struc.ps_fields in
-  print_string ("pstruct "^s^" : ");
-  print_int n;
-  print_newline ();
   let ns = {
     s_name = s;
     s_fields = Hashtbl.create n
@@ -155,24 +152,14 @@ let rec eq_type ty1 ty2 = match ty1, ty2 with
 
 let is_recursive (s : structure) =
   let n = s.s_name in
-  print_string (n^" : ");
-  print_int (Hashtbl.length s.s_fields);
-  print_string (" : ");
   let res = ref false in
   let rec aux f = 
-    print_endline f.f_name;
     match f.f_typ with
       |Tstruct s' ->  
         if s'.s_name = n then res := true
-        else (
-          print_string ("("^s'.s_name^" : ");
-          print_int (Hashtbl.length s'.s_fields);
-          print_string (" ) ");
-          Hashtbl.iter (fun _ -> fun x -> aux x) s'.s_fields)
+        else Hashtbl.iter (fun _ -> fun x -> aux x) s'.s_fields
       |_ -> ()
     in Hashtbl.iter (fun _ -> fun x -> aux x) s.s_fields;
-    print_bool !res;
-    print_newline ();
     !res
 
     
@@ -246,8 +233,8 @@ let correct_assign nlvl nel =
   let rec aux = function
     |[],[] -> true
     |Tptr(_)::t1,Tptr(tvoid)::t2 -> aux (t1,t2)
-    |Tptr(a)::t1,b::t2 ->(* (print_endline ("fst "^(typstr (Tptr a))^" : "^(typstr b))); *) (eq_type a b || eq_type (Tptr a) b) && aux (t1,t2) 
-    |a::t1,b::t2 -> (*(print_endline ("snd "^(typstr a)^" : "^(typstr b)));*) eq_type a b && aux (t1,t2) 
+    |Tptr(a)::t1,b::t2 -> (eq_type a b || eq_type (Tptr a) b) && aux (t1,t2) 
+    |a::t1,b::t2 -> eq_type a b && aux (t1,t2) 
     |_ -> false
 in aux (f1,f2)
 
@@ -310,13 +297,8 @@ and expr_desc env loc = function
       let l = List.map (fun x -> fst (expr env x)) el in
       TEprint l, tvoid, false
   | PEcall ({id="new"}, [{pexpr_desc=PEident {id;loc}}])->
-      let ty = match id with
-        | "int" -> Tint | "bool" -> Tbool | "string" -> Tstring
-        | _ -> 
-          if Pstructs.is_defed id then 
-            type_type (PTident{id;loc})
-        else error loc ("no such type " ^ id) in
-      TEnew ty, Tptr ty, false
+      let ty =  try Tstruct (Structs.find id) with _ -> error loc ("no such type " ^ id)
+      in TEnew ty, Tptr ty, false
   | PEcall ({id="new"}, _) ->
       error loc "new expects a type"
   | PEcall (id, el) ->
@@ -384,7 +366,7 @@ and expr_desc env loc = function
   | PEreturn el ->
       let sons = List.map (fun x -> fst (expr env x))  el in
       let ret = l_to_typ (List.map (fun x -> x.expr_typ) sons) in
-      if ret <> !ret_type then
+      if not (eq_type ret !ret_type) then
         errtyp loc !ret_type ret;
       TEreturn sons , tvoid, true
   | PEblock el ->
@@ -481,7 +463,6 @@ let rec is_well_formed = function
       Funcs.add f
     else error loc ("fonction "^id^" is ill-formed")
   | PDstruct ({ ps_name = {id; loc}; ps_fields = fl } as s)->
-    print_endline ("pstruct "^id^" added to Pstructs");
     if not (List.for_all is_well_formed (List.map snd fl)) then 
       error loc ("ill-formed types in structure :"^id);
     if not (Pstructs.are_fields_unique s) then
@@ -513,7 +494,6 @@ let file ~debug:b (imp, dl) =
   Pstructs.iter (fun st -> fun _ -> Structs.add (pstruct_to_struct st));
   if not !found_main then error dummy_loc "main not found";
   let dl = List.map decl dl in
-  print_int (Structs.card ());
   Structs.iter (fun _ -> fun s -> if is_recursive s then error dummy_loc ("structure "^s.s_name^" is recursive") else ());
   Env.check_unused (); 
   if imp && not !fmt_used then error dummy_loc "fmt imported but not used";
