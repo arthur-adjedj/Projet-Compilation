@@ -227,15 +227,22 @@ let errtyp loc exp real =
   error loc ("type "^(typstr exp)^" expected, found "^(typstr real)^" instead") 
 
 
-let correct_assign nlvl nel =
+let correct_assign loc nlvl nel =
   let f1 = flatten (List.map (fun x -> x.expr_typ) nlvl)
   and f2 = flatten (List.map (fun x -> x.expr_typ) nel) in
   let rec aux = function
-    |[],[] -> true
+    |[],[] -> ()
     |Tptr(_)::t1,Tptr(tvoid)::t2 -> aux (t1,t2)
-    |Tptr(a)::t1,b::t2 -> (eq_type a b || eq_type (Tptr a) b) && aux (t1,t2) 
-    |a::t1,b::t2 -> eq_type a b && aux (t1,t2) 
-    |_ -> false
+    |Tptr(a)::t1,b::t2 -> 
+      if not (eq_type a b || eq_type (Tptr a) b) then  
+        error loc ("wrong type assignation : "^(typstr (Tptr a))^" not compatible with "^typstr b);
+        aux (t1,t2) 
+    |a::t1,b::t2 -> 
+      if not (eq_type a b) then 
+        error loc ("wrong type assignation : "^(typstr a)^" not compatible with "^typstr b);
+       aux (t1,t2) 
+    |l,[] -> error loc ("not enough assignations, missing "^(string_of_int (List.length l))^" r-values")
+    |[],l -> error loc ("not enough assignations, missing "^(string_of_int (List.length l))^" l-values")
 in aux (f1,f2)
 
 let ret_type = ref tvoid
@@ -356,12 +363,20 @@ and expr_desc env loc = function
         let field = Hashtbl.find s.s_fields id.id in
         TEdot(ne,field),field.f_typ,false
   | PEassign (lvl, el) ->
-      let nlvl = List.map (fun x -> fst (expr env x)) lvl
+      let rec aux = function
+        | [] -> []
+        | {pexpr_desc = PEident {id=id}; pexpr_loc}::t -> 
+          (try 
+            let v = Env.find id !env in
+            {expr_desc = TEident v;expr_typ = v.v_typ}::aux t
+          with Not_found -> error pexpr_loc ("unbound variable " ^ id)) 
+        | h::t -> (fst (expr env h))::(aux t)
+      in
+      let nlvl = aux lvl
       and nel = List.map (fun x -> fst (expr env x)) el in
       if not (List.for_all is_l_value nlvl) then
-        error loc "ill-formed l-value";
-      if not (correct_assign nlvl nel) then
-        error loc "wrong type assignation";
+        error loc "ill-formed l-value";      
+      correct_assign loc nlvl nel;
       TEassign (nlvl, nel), tvoid, false 
   | PEreturn el ->
       let sons = List.map (fun x -> fst (expr env x))  el in
