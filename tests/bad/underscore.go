@@ -1,7 +1,8 @@
 package main
 
-func foo() (int, int) {
-	return 1,2
+func foo(){
+	var a = 2
+	a = a + 1
 }
 
 func test(){
@@ -9,8 +10,6 @@ func test(){
 }
 
 func main() {
-	var _ = "test"
-	var a = 3
-	_,a = foo()
-	_ = a
+	var _ = 2
+	_ = foo()
 }

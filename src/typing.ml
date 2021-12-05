@@ -277,7 +277,13 @@ and expr_desc env loc = function
           if (fst te2).expr_typ <> Tint then
             errtyp loc Tint (fst te2).expr_typ;
           TEbinop(op,fst te1, fst te2), Tint,false
-        | Beq | Bne | Blt | Ble | Bgt | Bge -> 
+        | Beq | Bne -> 
+          if (fst te1).expr_desc = TEnil then 
+            error loc "nil present in left-hand side of comparison";
+          if (fst te2).expr_desc = TEnil then 
+            error loc "nil present in right-hand side of comparison";
+          TEbinop(op,fst te1,fst te2),Tbool,false
+        | Blt | Ble | Bgt | Bge -> 
           if (fst te1).expr_typ <> Tint  then
             errtyp loc Tint (fst te1).expr_typ;
           if (fst te2).expr_typ <> Tint  then
@@ -301,8 +307,7 @@ and expr_desc env loc = function
           error e1.pexpr_loc "this operator can't be applied to type bool" 
         |Tptr(_) -> if op <> Ustar then 
           error e1.pexpr_loc "this operator can't be applied to pointer" 
-        |_ -> error e1.pexpr_loc "can't apply unary operation to this expression!"
-      );
+        |_ -> error e1.pexpr_loc "can't apply unary operation to this expression!");
       TEunop(op,son),son.expr_typ,false
   | PEcall ({id = "fmt.Print"}, el) ->
       if not !fmt_imported then 
@@ -352,7 +357,7 @@ and expr_desc env loc = function
       !returns
   | PEnil -> TEnil ,Tptr(tvoid),false 
   | PEident {id=id} ->
-    if id="_" then error loc " _ is not a variable";
+    if id = "_" then error loc " _ is not a variable";
      (try 
         let v = Env.find id !env in
          v.v_used <- true;
@@ -419,7 +424,7 @@ and expr_desc env loc = function
         errtyp e.pexpr_loc Tint ne.expr_typ;
       if not (is_l_value ne) then
         error e.pexpr_loc "l-value expected";
-      TEincdec(ne,op),Tint,false
+      TEincdec(ne,op),tvoid,false
   | PEvars(ids,ptyps,pexprs) -> (
       match ptyps with
         |None -> 
