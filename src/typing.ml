@@ -297,6 +297,8 @@ and expr_desc env loc = function
           TEbinop(op,fst te1, fst te2), Tbool,false)
   | PEunop (Uamp, e1) ->
       let son = fst (expr env e1) in
+      if not (is_l_value son) then
+        error loc "& can only be used on l-values";
       TEunop(Uamp, son),Tptr(son.expr_typ),false
   | PEunop (Uneg | Unot | Ustar as op, e1) -> 
       let son = fst (expr env e1) in
@@ -321,8 +323,6 @@ and expr_desc env loc = function
   | PEcall ({id="new"}, _) ->
       error loc "new expects a type"
   | PEcall (id, el) ->
-      (*tests possiblement nécessaires 
-      pour vérifier le bon typage des fonctions*)
       let af = Funcs.find id.id in
       let f = 
         {fn_name = af.pf_name.id;
@@ -456,7 +456,6 @@ and expr_desc env loc = function
 let found_main = ref false
 
 (* 1. declare structures *)
-(*A TESTER*)
 let phase1 = function
   | PDstruct ({ ps_name = { id = id; loc = loc }} as s) -> 
       if Pstructs.is_defed id then 
@@ -465,7 +464,6 @@ let phase1 = function
   | PDfunction _ -> ()
 
 
-(*A TESTER*)
 let rec sizeof = function
   | Tint | Tbool | Tstring | Tptr _ -> 8
   | Tstruct s -> Hashtbl.fold (fun _ b c -> c + sizeof (b.f_typ)) s.s_fields 0
