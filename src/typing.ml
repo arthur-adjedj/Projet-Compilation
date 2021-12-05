@@ -227,23 +227,25 @@ let errtyp loc exp real =
   error loc ("type "^(typstr exp)^" expected, found "^(typstr real)^" instead") 
 
 
+
+
 let correct_assign loc nlvl nel =
-  let f1 = flatten (List.map (fun x -> x.expr_typ) nlvl)
-  and f2 = flatten (List.map (fun x -> x.expr_typ) nel) in
-  let rec aux = function
+  let f2 = flatten (List.map (fun x -> x.expr_typ) nel) in
+  let rec aux (a,b) = match a,b with
     |[],[] -> ()
-    |Tptr(_)::t1,Tptr(tvoid)::t2 -> aux (t1,t2)
-    |Tptr(a)::t1,b::t2 -> 
+    |{expr_desc = TEident {v_name = "_"}}::t1,_::t2 -> aux (t1,t2)
+    |{expr_typ = Tptr(_)}::t1,Tptr(tvoid)::t2 -> aux (t1,t2)
+    |{expr_typ = Tptr(a)}::t1,b::t2 -> 
       if not (eq_type a b || eq_type (Tptr a) b) then  
         error loc ("wrong type assignation : "^(typstr (Tptr a))^" not compatible with "^typstr b);
         aux (t1,t2) 
-    |a::t1,b::t2 -> 
+    |{expr_typ = a}::t1,b::t2 -> 
       if not (eq_type a b) then 
         error loc ("wrong type assignation : "^(typstr a)^" not compatible with "^typstr b);
        aux (t1,t2) 
     |l,[] -> error loc ("not enough assignations, missing "^(string_of_int (List.length l))^" r-values")
     |[],l -> error loc ("not enough assignations, missing "^(string_of_int (List.length l))^" l-values")
-in aux (f1,f2)
+in aux (nlvl,f2)
 
 let ret_type = ref tvoid
 
@@ -345,6 +347,7 @@ and expr_desc env loc = function
       !returns
   | PEnil -> TEnil ,Tptr(tvoid),false 
   | PEident {id=id} ->
+    if id="_" then error loc " _ is not a variable";
      (try 
         let v = Env.find id !env in
          v.v_used <- true;
