@@ -4,6 +4,10 @@ func foo() (int, int) {
 	return 1,2
 }
 
+func test(){
+	_ = 2
+}
+
 func main() {
 	var _ = "test"
 	var a = 3

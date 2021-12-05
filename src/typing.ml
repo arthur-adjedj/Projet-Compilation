@@ -174,6 +174,10 @@ let new_var =
     incr id;
     { v_name = x; v_id = !id; v_loc = loc; v_typ = ty; v_used = used; v_addr = false }
 
+
+let tvoid = Tmany []
+
+
 module Env = struct
   module M = Map.Make(String)
   type t = var M.t
@@ -192,6 +196,8 @@ module Env = struct
     all_vars := v :: !all_vars;
     add env v, v
 
+  let new_env = fst (var "_" dummy_loc tvoid empty)
+  
   (* TODO type () et vecteur de types *)
 end
 
@@ -203,7 +209,6 @@ let typ_to_l = function
   |Tmany a -> a
   |_ as a -> [a]
 
-let tvoid = Tmany []
 let make d ty = { expr_desc = d; expr_typ = ty }
 let stmt d = make d tvoid
 
@@ -494,7 +499,7 @@ let decl = function
     let return_type = List.map type_type tyl in
     ret_type := l_to_typ return_type;
     let f = { fn_name = id; fn_params = []; fn_typ = []} in
-    let env = ref Env.empty in
+    let env = ref Env.new_env in
     List.iter (fun (p,t) -> env := fst (Env.var p.id p.loc (type_type t) !env)) params ;
     let e, rt = expr env e in
     if !ret_type <> tvoid && not rt then error loc "return expected";
