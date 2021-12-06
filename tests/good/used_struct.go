@@ -5,5 +5,5 @@ type A struct {
 func main() {
 	var a A 
 	a.a = 2
-	
+	_ = a.a
 }
