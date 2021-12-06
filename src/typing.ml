@@ -296,13 +296,15 @@ and expr_desc env loc = function
       let son = fst (expr env e1) in
       (match son.expr_typ with
         |Tint -> if op <> Uneg then 
-          error e1.pexpr_loc "this operator can't be applied to type int" 
+          error e1.pexpr_loc "this operator can't be applied to type int" ;
+          TEunop(op,son),son.expr_typ,false
         |Tbool -> if op <> Unot then 
-          error e1.pexpr_loc "this operator can't be applied to type bool" 
-        |Tptr(_) -> if op <> Ustar then 
-          error e1.pexpr_loc "this operator can't be applied to pointer" 
-        |_ -> error e1.pexpr_loc "can't apply unary operation to this expression!");
-      TEunop(op,son),son.expr_typ,false
+          error e1.pexpr_loc "this operator can't be applied to type bool" ;
+          TEunop(op,son),son.expr_typ,false
+        |Tptr(a) -> if op <> Ustar then 
+          error e1.pexpr_loc "this operator can't be applied to pointer";
+          TEunop(op,son),a,false
+        |_ -> error e1.pexpr_loc "can't apply unary operation to this expression!")
   | PEcall ({id = "fmt.Print"}, el) ->
       if not !fmt_imported then 
         error loc "fmt used but not imported";
