@@ -215,11 +215,7 @@ let stmt d = make d tvoid
 let rec is_l_value e = match e.expr_desc with
   |TEident(_) -> true
   |TEdot(el,_) -> is_l_value el
-  |TEunop(Ustar,el) -> (
-    match el.expr_typ with 
-      |Tptr _ -> el.expr_desc <> TEnil
-      |_ -> false
-    ) 
+  |TEunop(Ustar,el) ->  el.expr_desc <> TEnil
   |_ -> false
 
 let rec flatten = function
@@ -230,8 +226,6 @@ let rec flatten = function
 
 let errtyp loc exp real =
   error loc ("type "^(typstr exp)^" expected, found "^(typstr real)^" instead") 
-
-
 
 
 let correct_assign loc nlvl nel =
@@ -278,10 +272,8 @@ and expr_desc env loc = function
             errtyp loc Tint (fst te2).expr_typ;
           TEbinop(op,fst te1, fst te2), Tint,false
         | Beq | Bne -> 
-          if (fst te1).expr_desc = TEnil then 
-            error loc "nil present in left-hand side of comparison";
-          if (fst te2).expr_desc = TEnil then 
-            error loc "nil present in right-hand side of comparison";
+          if (fst te1).expr_desc = TEnil && (fst te2).expr_desc = TEnil then 
+            error loc "illicit comparison";
           TEbinop(op,fst te1,fst te2),Tbool,false
         | Blt | Ble | Bgt | Bge -> 
           if (fst te1).expr_typ <> Tint  then
