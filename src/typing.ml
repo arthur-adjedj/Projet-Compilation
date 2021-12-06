@@ -371,15 +371,26 @@ and expr_desc env loc = function
         TEdot(ne,field),field.f_typ,false
   | PEassign (lvl, el) ->
       let rec aux = function
-        | [] -> []
-        | {pexpr_desc = PEident {id=id}; pexpr_loc}::t -> 
+        | {pexpr_desc = PEident {id=id}; pexpr_loc} -> 
           (try 
             let v = Env.find id !env in
-            {expr_desc = TEident v;expr_typ = v.v_typ}::aux t
+            {expr_desc = TEident v;expr_typ = v.v_typ}
           with Not_found -> error pexpr_loc ("unbound variable " ^ id)) 
-        | h::t -> (fst (expr env h))::(aux t)
+        | {pexpr_desc = PEdot(e,id); pexpr_loc} -> 
+          let e' = aux e in 
+          let s = match e'.expr_typ with
+            |Tstruct a 
+            |Tptr(Tstruct a)-> pstruct_to_struct a.s_name
+            |a -> error loc ("type "^(typstr a)^" doesn't have any method")
+          in 
+          if not (Hashtbl.mem s.s_fields id.id) then
+            error loc ("structure "^s.s_name^" doesn't have method "^id.id)
+          else 
+            let field = Hashtbl.find s.s_fields id.id in
+            {expr_desc = TEdot(e',field);expr_typ = field.f_typ}
+        | h -> (fst (expr env h))
       in
-      let nlvl = aux lvl
+      let nlvl = List.map aux lvl
       and nel = List.map (fun x -> fst (expr env x)) el in
       if not (List.for_all is_l_value nlvl) then
         error loc "ill-formed l-value";      
