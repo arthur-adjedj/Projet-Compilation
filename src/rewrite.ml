@@ -17,7 +17,7 @@ open Tast
        return e1,...,en
     => *r1 = e1, ..., *rn =en; return
 
-       lv1,...,lv = f(...)
+       lv1,...,lvn = f(...)
     => f(..., &lv1,...,&lvn)
 
        g(f(...))

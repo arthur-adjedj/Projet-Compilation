@@ -97,6 +97,10 @@ module Funcs = struct
     in try add_table f.pf_params;true with _ -> false
 end
 
+let rec sizeof = function
+  | Tint | Tbool | Tstring | Tptr _ -> 8
+  | Tstruct s -> Hashtbl.fold (fun _ b c -> c + sizeof (b.f_typ)) s.s_fields 0
+  | Tmany l -> List.fold_left (fun i x -> i + sizeof (x)) 0 l
 
 let rec pstruct_to_struct s = 
   try Structs.find s with _ ->
@@ -110,14 +114,18 @@ let rec pstruct_to_struct s =
   } in
   Structs.add ns;
   let h = (Structs.find s).s_fields in
+  let offset = ref 0 in
   let rec aux = function
   |[] -> ()
-  |(p,t)::r -> Hashtbl.add h p.id 
+  |(p,t)::r -> 
+    let tt = type_type t in
+    Hashtbl.add h p.id 
     {
       f_name = p.id;
-      f_typ =  type_type t;
-      f_ofs = 0 
+      f_typ =  tt;
+      f_ofs = !offset
     };
+    offset := !offset + sizeof tt;
     aux r
   in aux struc.ps_fields;
   ns
@@ -172,7 +180,7 @@ let new_var =
   let id = ref 0 in
   fun x loc ?(used=false) ty ->
     incr id;
-    { v_name = x; v_id = !id; v_loc = loc; v_typ = ty; v_used = used; v_addr = false }
+    { v_name = x; v_id = !id; v_loc = loc; v_typ = ty; v_used = used; v_addr = false}
 
 
 let tvoid = Tmany []
@@ -469,10 +477,6 @@ let phase1 = function
   | PDfunction _ -> ()
 
 
-let rec sizeof = function
-  | Tint | Tbool | Tstring | Tptr _ -> 8
-  | Tstruct s -> Hashtbl.fold (fun _ b c -> c + sizeof (b.f_typ)) s.s_fields 0
-  | Tmany l -> List.fold_left (fun i x -> i + sizeof (x)) 0 l
 
 (* 2. declare functions and type fields *)
 
