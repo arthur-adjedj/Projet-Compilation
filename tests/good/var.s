@@ -7,14 +7,10 @@ main:
 F_main:
 	pushq %rbp
 	movq %rsp, %rbp
-	pushq $0
-	movq $3, %rdi
-	movq %rdi, -8(%rbp)
-	movq -8(%rbp), %rdi
-	movq %rdi, %rax
+	subq %rsp, $8
 	movq $2, %rdi
-	addq %rax, %rdi
-	movq -8(%rbp), %rdi
+	movq -4(%rbp), %rdi
+	popq %rdi
 	call print_int
 E_main:
 	movq %rbp, %rsp

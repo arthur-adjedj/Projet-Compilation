@@ -5,7 +5,6 @@ open Format
 open Lexing
 open Lexer
 open Parser
-open Pretty
 
 let usage = "usage: ./pgoc [options] file.go"
 
@@ -44,9 +43,10 @@ let () =
   try
     let f = Parser.file Lexer.next_token lb in
     close_in c;
-    if debug then ast_file std_formatter (snd f);
+    if debug then Pretty.ast_file std_formatter (snd f);
     if !parse_only then exit 0;
     let f = Typing.file ~debug f in
+    if debug then eprintf "%a@." Pretty.file f;
     if type_only then exit 0;
     let f = Rewrite.file ~debug f in
     if debug then eprintf "%a@." Pretty.file f;

@@ -75,9 +75,7 @@ let addr e = make (TEunop (Uamp, e)) (Tptr e.expr_typ)
 let many_results f = List.length f.fn_typ > 1
 
 module Vmap = Map.Make(struct
-                  type t = var 
-                  let compare v1 v2 = v1.v_id - v2.v_id 
-                  end)
+                  type t = var let compare v1 v2 = v1.v_id - v2.v_id end)
 
 type rw = {
   subst: expr Vmap.t;

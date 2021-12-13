@@ -11,10 +11,6 @@ F_main:
 	movq $3, %rdi
 	movq %rdi, -8(%rbp)
 	movq -8(%rbp), %rdi
-	movq %rdi, %rax
-	movq $2, %rdi
-	addq %rax, %rdi
-	movq -8(%rbp), %rdi
 	call print_int
 E_main:
 	movq %rbp, %rsp

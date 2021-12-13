@@ -57,6 +57,9 @@ type env = {
   next_local: int; (* 0, 1, ... *)
 }
 
+
+
+
 let empty_env =
   { exit_label = ""; ofs_this = -1; nb_locals = ref 0; next_local = 0 }
 
@@ -71,20 +74,31 @@ let compile_bool f =
   label l_true ++
   movq (imm 1) (reg rdi) ++
   label l_end
+ 
+let fields h = Hashtbl.fold (fun _ x y -> x::y) h []
 
-let rec expr env e = match e.expr_desc with
+let htbl_to_list e h = (*très fier de cette horreur*)
+  Hashtbl.fold (fun x y z-> 
+    [make (TEconstant (Cstring (x ^" : ")))Tstring;
+    make (TEdot(e,y)) y.f_typ]@z) h []
+
+
+let adress f var = 
+  -8*(List.length f.fn_params + 2 + var.v_id)
+
+let rec expr (env: env) e = match e.expr_desc with
   | TEskip ->
-    nop
+      nop
   | TEconstant (Cbool true) ->
-    movq (imm 1) (reg rdi)
+      movq (imm 1) !%rdi
   | TEconstant (Cbool false) ->
-    movq (imm 0) (reg rdi)
+      movq (imm 0) !%rdi
   | TEconstant (Cint x) ->
-    movq (imm64 x) (reg rdi)
+      movq (imm64 x) !%rdi
   | TEnil ->
-    xorq (reg rdi) (reg rdi)
+      xorq (reg rdi) !%rdi
   | TEconstant (Cstring s) ->
-    movq (ilab (alloc_string s)) (reg rdi)
+      movq (ilab (alloc_string s)) !%rdi
   | TEbinop (Band, e1, e2) ->
       expr env 
         (mk_bool
@@ -92,6 +106,7 @@ let rec expr env e = match e.expr_desc with
             mk_bool (TEunop(Unot,e1)),
             mk_bool (TEconstant (Cbool false)) ,
             e2)))
+
   | TEbinop (Bor, e1, e2) ->
     expr env 
     (mk_bool 
@@ -100,47 +115,53 @@ let rec expr env e = match e.expr_desc with
         mk_bool (TEconstant (Cbool true)),        
         e2
         )))
+
   | TEbinop (Blt | Ble | Bgt | Bge as op, e1, e2) -> 
     expr env e1 ++
-    movq (reg rdi) (reg rax) ++
+    movq !%rdi !%rax ++
     expr env e2 ++
-    cmpq (reg rdi) (reg rax) ++
-    compile_bool (match op with
-      |Blt -> jl
-      |Ble -> jle
-      |Bgt -> jg
-      |Bge -> jge
-      |_ -> failwith "tptc")
+    cmpq !%rdi !%rax ++
+    compile_bool (
+      match op with
+        |Blt -> jl
+        |Ble -> jle
+        |Bgt -> jg
+        |Bge -> jge
+        |_ -> failwith "tptc"
+    )
+
   | TEbinop (Badd | Bsub | Bmul | Bdiv | Bmod as op, e1, e2) ->
       expr env e1 ++
-      movq (reg rdi) (reg rax) ++
+      movq !%rdi !%rax ++
       expr env e2 ++
       (match op with
-        | Badd -> addq (reg rax) (reg rdi)
-        | Bsub -> subq (reg rax) (reg rdi)
-        | Bmul -> imulq (reg rax) (reg rdi)
-        | Bdiv -> movq (imm 0) (reg rdx) ++
-                  idivq (reg rdi)  ++
-                  movq (reg rax) (reg rdi)
-        | Bmod -> movq (imm 0) (reg rdx) ++
-                  idivq (reg rdi)  ++
-                  movq (reg rdx) (reg rdi)
-        |_ -> failwith "tptc"
-      )
+        | Badd -> addq !%rax !%rdi
+        | Bsub -> subq !%rax !%rdi
+        | Bmul -> imulq !%rax !%rdi
+        | Bdiv -> movq (imm64 0L) !%rdx ++
+                  idivq !%rdi  ++
+                  movq !%rax !%rdi
+        | Bmod -> movq (imm64 0L) !%rdx ++
+                  idivq !%rdi  ++
+                  movq !%rdx !%rdi
+        |_ -> failwith "tptc")
 
   | TEbinop (Beq | Bne as op, e1, e2) ->
-    expr env e1 ++
-    movq (reg rdi) (reg rax) ++
-    expr env e2 ++
-    cmpq (reg rdi) (reg rax) ++
-    compile_bool (match op with |Beq -> je | Bne -> jne |_ -> failwith "tptc")
+      expr env e1 ++
+      movq !%rdi !%rax ++
+      expr env e2 ++
+      cmpq !%rdi !%rax ++
+      compile_bool (match op with |Beq -> je | Bne -> jne |_ -> failwith "tptc")
+
   | TEunop (Uneg, e1) ->
-    expr env e1 ++
-    negq (reg rdi)
+      expr env e1 ++
+      negq !%rdi
+
   | TEunop (Unot, e1) ->
-    expr env e1 ++
-    cmpq (imm 0) (reg rdi) ++
-    compile_bool jz
+      expr env e1 ++
+      cmpq (imm64 0L) !%rdi ++
+      compile_bool jz
+
   | TEunop (Uamp, e1) ->
     (* TODO code pour & *) assert false 
   | TEunop (Ustar, e1) ->
@@ -151,35 +172,61 @@ let rec expr env e = match e.expr_desc with
         |e::t ->
           expr env e ++ (
           match e.expr_typ with
-          | Tint -> call "print_int"
-          | Tbool -> call "print_bool"
-          | Tstring -> call "print_string"
-          | _ -> raise Exit
-          ) ++ (if t <> [] then (++) (call "print_space") else id)  (aux t)
-    in aux el
-    (* TODO code pour Print *) 
+            | Tint | Tptr _ -> call "print_int"
+            | Tbool -> call "print_bool"
+            | Tstring -> call "print_string"
+            | Tstruct s -> aux (htbl_to_list e s.s_fields)
+            |_ -> failwith "tptc"
+        ) ++ (if t <> [] then (++) (call "print_space") else id)  (aux t)
+      in aux el
+
   | TEident x ->
-    (* TODO code pour x *) assert false 
-  | TEassign ([{expr_desc=TEident x}], [e1]) ->
-    (* TODO code pour x := e *) assert false 
+      let a = (ind ~ofs:(-8*( x.v_id + env.ofs_this +1 ))  rbp) in
+      print_string ("trying to find "^x.v_name^" in address : ");
+      (convert a) std_formatter ();
+      print_newline ();
+      movq a !%rdi
+    (* TODO code pour x *) 
+  | TEassign ([{expr_desc = TEident x}], [e1]) ->
+      let ofse = x.v_id + env.ofs_this+1  in 
+      let a = (ind ~ofs:(-8*ofse) rbp) in
+      print_string ("id of "^x.v_name^" : ");
+      print_int x.v_id;
+      print_string "\noffset of env : ";
+      print_int env.ofs_this;
+      print_string ("\nplace of value "^x.v_name^" in mem: ");
+      (X86_64.convert a) std_formatter ();
+      print_newline ();
+      expr env e1 ++
+      if x.v_name = "_" then nop else movq !%rdi a
+
   | TEassign ([lv], [e1]) ->
     (* TODO code pour x1,... := e1,... *) assert false 
   | TEassign (_, _) ->
-     assert false
+      assert false
   | TEblock el ->
-     List.fold_right (++) (List.map (expr env) el) nop
-     (* TODO code pour block *) 
+      let rec parcours el = (match el with
+        |[] -> nop
+        |{expr_desc = TEvars(vrs)}::t -> 
+          List.fold_left (fun res v ->(
+            if v.v_name = "_" then nop else
+            (pushq (imm64 0L)) ) ++
+            res
+            ) nop vrs ++ parcours t
+        |h::t -> expr env h ++ (parcours t )) in
+      parcours el
   | TEif (e1, e2, e3) ->
-    let thena = new_label () in
-    let elsea = new_label () in
-    expr env e1 ++
-    cmpq (imm 0) (reg rdi)  ++
-    je elsea ++
-    expr env e2 ++
-    jmp thena ++
-    label elsea ++
-    expr env e3 ++
-    label thena
+      let thena = new_label () in
+      let elsea = new_label () in
+      expr env e1 ++
+      cmpq (imm64 0L) !%rdi  ++
+      je elsea ++
+      expr env e2 ++
+      jmp thena ++
+      label elsea ++
+      expr env e3 ++
+      label thena
+
   | TEfor (e1, e2) ->
      (* TODO code pour for *) assert false
   | TEnew ty ->
@@ -189,7 +236,7 @@ let rec expr env e = match e.expr_desc with
   | TEdot (e1, {f_ofs=ofs}) ->
      (* TODO code pour e.f *) assert false
   | TEvars _ ->
-     assert false (* fait dans block *)
+      nop
   | TEreturn [] ->
     (* TODO code pour return e *) assert false
   | TEreturn [e1] ->
@@ -199,23 +246,34 @@ let rec expr env e = match e.expr_desc with
   | TEincdec (e1, op) ->
     (* TODO code pour return e++, e-- *) assert false
 
+
+
+let maxalloc f e =
+  let rec nb_vars = function
+    |[] -> 0
+    |TEvars(vs) :: t -> List.length vs + (nb_vars t)
+    |TEblock(l)::t2 -> List.fold_left (fun a x -> a + nb_vars [x.expr_desc] ) 0 l + nb_vars t2
+    |_::t -> nb_vars t
+  in List.length f.fn_params + nb_vars e
+  
 let function_ f e =
   if !debug then eprintf "function %s:@." f.fn_name;
   (* TODO code pour fonction *) 
   let s = f.fn_name in 
   label ("F_" ^ s) ++ 
   (*rajouter adresses arguments/retours*)
-  pushq (reg rbp) ++
-  movq (reg rsp) (reg rbp) ++
+  pushq !%rbp ++
+  movq !%rsp !%rbp ++
   (expr empty_env e) ++
   label ("E_" ^ s) ++
-  movq (reg rbp) (reg rsp) ++
+  movq !%rbp !%rsp ++
   popq rbp ++
   ret
 
 let decl code = function
   | TDfunction (f, e) -> code ++ function_ f e
   | TDstruct _ -> code
+
 
 let file ?debug:(b=false) dl =
   debug := b;
@@ -224,7 +282,7 @@ let file ?debug:(b=false) dl =
   { text =
       globl "main" ++ label "main" ++
       call "F_main" ++
-      xorq (reg rax) (reg rax) ++
+      xorq !%rax !%rax ++
       ret ++
       funs ++
       inline "

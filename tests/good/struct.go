@@ -16,7 +16,7 @@ func main() {
 	z.next = new(L)
 	n := z.next
 	n.x = 43;
-	fmt.Print(z.x)
+	fmt.Print(n.x)
 	fmt.Print(z.next.x)
 	fmt.Print(z.next.next)
 	fmt.Print("\n")

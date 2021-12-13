@@ -86,6 +86,8 @@ type label = string
 
 type 'size operand = formatter -> unit -> unit
 
+let convert : [> ] operand -> formatter -> unit -> unit = fun x -> x
+
 let mangle_none fmt (l: label) = fprintf fmt "%s" l
 let mangle_leading_underscore fmt (l: label) = fprintf fmt "_%s" l
 let mangle = mangle_none

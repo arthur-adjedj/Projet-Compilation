@@ -144,9 +144,9 @@ let rec typstr = function
   | Tstring -> "string"
   | Tstruct s -> s.s_name
   | Tptr ty -> "*"^(typstr ty)
-  | Tmany [x] -> typstr x
-  | Tmany (h::t) -> (typstr h)^" , "^typstr (Tmany t)
-  | Tmany [] -> "" 
+  | Tmany [x] -> (typstr x)^"]"
+  | Tmany (h::t) -> "["^(typstr h)^" , "^typstr (Tmany t)
+  | Tmany [] -> "[]"
 
 let rec eq_type ty1 ty2 = match ty1, ty2 with
   | Tint, Tint | Tbool, Tbool | Tstring, Tstring -> true
@@ -176,13 +176,15 @@ let fmt_imported = ref false
 
 let evar v = { expr_desc = TEident v; expr_typ = v.v_typ }
 
-let new_var =
+let new_var,get_id,set_id =
   let id = ref 0 in
-  fun x loc ?(used=false) ty ->
+  ((fun x loc ?(used=false) ty ->
     incr id;
-    { v_name = x; v_id = !id; v_loc = loc; v_typ = ty; v_used = used; v_addr = false}
+    { v_name = x; v_id = !id; v_loc = loc; v_typ = ty; v_used = used; v_addr = false}),
+  (fun () -> !id),(fun x -> id := x))
 
 
+    
 let tvoid = Tmany []
 
 
@@ -195,16 +197,21 @@ module Env = struct
   let all_vars = ref []
   let check_unused () =
     let check v =
-      if v.v_name <> "_" && not v.v_used then error v.v_loc ("unused variable "^v.v_name) in
+      if v.v_name <> "_" && not v.v_used then (
+        Pretty.(print_list comma var) std_formatter !all_vars;
+        error v.v_loc ("unused variable "^v.v_name)) in
     List.iter check !all_vars
 
+  let print_vars env = 
+    let a = M.fold (fun _ x z -> x::z) env [] in
+    Pretty.(print_list comma var) std_formatter a
 
   let var x loc ?used ty env =
     let v = new_var x loc ?used ty in
     all_vars := v :: !all_vars;
     add env v, v
 
-  let new_env = fst (var "_" dummy_loc tvoid empty)
+  let new_env = let a = fst (var "_" dummy_loc tvoid empty) in set_id 0;a
   
   (* TODO type () et vecteur de types *)
 end
@@ -254,6 +261,19 @@ let correct_assign loc nlvl nel =
     |[],l -> error loc ("not enough assignations, missing "^(string_of_int (List.length l))^" l-values")
 in aux (nlvl,f2)
 
+let dummy_expr x loc = {pexpr_desc = (PEident x); pexpr_loc = loc}
+
+let dummy s = {id = s;loc = dummy_loc}
+
+let rec typ_to_ptyp loc = function
+  | Tint -> PTident (dummy "int")
+  | Tbool -> PTident (dummy "bool")
+  | Tstring -> PTident (dummy "string")
+  | Tptr a -> PTptr (typ_to_ptyp loc a)
+  | Tstruct s -> PTident (dummy s.s_name)
+  | x -> print_endline (typstr x); error loc "club penguin is kil"
+
+
 let ret_type = ref tvoid
 
 let rec expr env e =
@@ -262,7 +282,7 @@ let rec expr env e =
 
 and expr_desc env loc = function
   | PEskip ->
-     TEskip, tvoid, false
+      TEskip, tvoid, false
   | PEconstant c ->
       TEconstant c, 
       (match c with
@@ -324,22 +344,26 @@ and expr_desc env loc = function
       in TEnew ty, Tptr ty, false
   | PEcall ({id="new"}, _) ->
       error loc "new expects a type"
-  | PEcall (id, el) ->
-      let af = Funcs.find id.id in
-      let f = 
-        {fn_name = af.pf_name.id;
-        fn_params = List.map 
-          (fun (p,t) ->
-            new_var 
-              p.id 
-              p.loc 
-              (type_type t)
-          ) af.pf_params;
-        fn_typ =  List.map type_type af.pf_typ;
-        } in 
-        let exprs = List.map (fun x -> fst (expr env x)) el in
-        let ty = l_to_typ f.fn_typ in
-      TEcall(f,exprs),ty,false
+  | PEcall (id, el) ->(
+      try 
+        let af = Funcs.find id.id in
+        if List.length af.pf_params <> List.length el then 
+          error loc "arity error";
+        let f = 
+          {fn_name = af.pf_name.id;
+          fn_params = List.map 
+            (fun (p,t) ->
+              new_var 
+                p.id 
+                p.loc 
+                (type_type t)
+            ) af.pf_params;
+          fn_typ =  List.map type_type af.pf_typ;
+          } in 
+          let exprs = List.map (fun x -> fst (expr env x)) el in
+          let ty = l_to_typ f.fn_typ in
+        TEcall(f,exprs),ty,false
+      with _ -> error loc "fun not found")
   | PEfor (e, b) ->
       let (ne,r1) = expr env e
       and (nb,r2) =  expr env b in
@@ -364,7 +388,7 @@ and expr_desc env loc = function
         let v = Env.find id !env in
          v.v_used <- true;
          TEident v, v.v_typ, false
-      with Not_found -> error loc ("unbound variable " ^ id))
+      with Not_found -> (error loc ("unbound variable in ident :" ^ id)))
   | PEdot (e, id) ->
       let (ne,r) = expr env e in
       let s = match ne.expr_typ with
@@ -383,7 +407,7 @@ and expr_desc env loc = function
           (try 
             let v = Env.find id !env in
             {expr_desc = TEident v;expr_typ = v.v_typ}
-          with Not_found -> error pexpr_loc ("unbound variable " ^ id)) 
+          with Not_found -> error pexpr_loc ("unbound variable in assign: " ^ id)) 
         | {pexpr_desc = PEdot(e,id); pexpr_loc} -> 
           let e' = aux e in 
           let s = match e'.expr_typ with
@@ -393,9 +417,10 @@ and expr_desc env loc = function
           in 
           if not (Hashtbl.mem s.s_fields id.id) then
             error loc ("structure "^s.s_name^" doesn't have method "^id.id)
-          else 
+          else (try
             let field = Hashtbl.find s.s_fields id.id in
             {expr_desc = TEdot(e',field);expr_typ = field.f_typ}
+          with _ -> error loc "field not found")
         | h -> (fst (expr env h))
       in
       let nlvl = List.map aux lvl
@@ -412,7 +437,20 @@ and expr_desc env loc = function
       TEreturn sons , tvoid, true
   | PEblock el ->
       let curenv = !env in
+      let curvars = !Env.all_vars in
+      let old_id = get_id () in
       let has_a_return = ref false in
+      let rec rewrite = function
+        | [] -> []
+        | ({pexpr_desc = PEvars(x,None,l);pexpr_loc} as pe)::t -> 
+          let _ = expr env pe in
+          let ptyps = List.map (fun x -> typ_to_ptyp loc x) 
+            (flatten (List.map (fun x -> (fst (expr env x)).expr_typ ) l)) in
+          let xs = List.map (fun x -> dummy_expr x pexpr_loc) x in
+          (List.map2 (fun x y -> {pexpr_desc = PEvars([x],Some y,[]);pexpr_loc = loc}) x ptyps)
+          @({pexpr_desc = PEassign(xs,l);pexpr_loc = loc}::rewrite t)
+        | x::t -> x::(rewrite t)
+      in
       let rec aux = function
         |[] -> ()
         |[(e,true)] -> has_a_return := true
@@ -427,8 +465,13 @@ and expr_desc env loc = function
           )
           else aux t
           in
-      let sons = List.map (fun x -> expr env x) el in
+      let rw = rewrite el in
+      Env.all_vars := curvars;
+      set_id old_id;
+      env:=curenv;
+      let sons = List.map (fun x -> expr env x) rw in
       aux sons;
+      print_newline ();
       env := curenv;
       TEblock (List.map fst sons), tvoid, !has_a_return
   | PEincdec(e, op) ->
@@ -438,9 +481,7 @@ and expr_desc env loc = function
       if not (is_l_value ne) then
         error e.pexpr_loc "l-value expected";
       TEincdec(ne,op),tvoid,false
-  | PEvars(ids,ptyps,pexprs) -> (
-      match ptyps with
-        |None -> 
+  | PEvars(ids,None,pexprs) ->
           if pexprs = [] then
             error loc "empty declarations must be explicitly typed"
           else let types = List.map (fun x -> (fst (expr env x)).expr_typ) pexprs in
@@ -453,7 +494,7 @@ and expr_desc env loc = function
                 ids (flatten types) in
               TEvars(vars),Tmany(types),false
             with (Invalid_argument _) -> error loc "incorrect number of elements returned" )
-        |Some pt ->
+  | PEvars(ids,Some pt,pexprs) -> 
           let p = type_type pt in 
           TEvars(
             List.map 
@@ -462,7 +503,7 @@ and expr_desc env loc = function
                 env := fst next;
                 snd next) ids),
           tvoid,false
-    )
+    
     
 
 
@@ -507,12 +548,14 @@ let rec is_well_formed = function
 
 (* 3. type check function bodies *)
 let decl = function
-  | PDfunction { pf_name={id; loc}; pf_params = params;pf_body = e; pf_typ=tyl } ->
+  | PDfunction { pf_name={id; loc}; pf_params = pfparams;pf_body = e; pf_typ=tyl } ->
     let return_type = List.map type_type tyl in
     ret_type := l_to_typ return_type;
-    let f = { fn_name = id; fn_params = []; fn_typ = []} in
+    let params = ref [] in
     let env = ref Env.new_env in
-    List.iter (fun (p,t) -> env := fst (Env.var p.id p.loc (type_type t) !env)) params ;
+    List.iter (fun (p,t) -> let (a,b) = (Env.var p.id p.loc (type_type t) !env) in
+    env := a;params := b::!params) pfparams ;
+    let f = { fn_name = id; fn_params = !params; fn_typ = return_type} in
     let e, rt = expr env e in
     if !ret_type <> tvoid && not rt then error loc "return expected";
     TDfunction (f, e)
