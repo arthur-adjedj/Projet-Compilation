@@ -7,22 +7,21 @@ main:
 F_main:
 	pushq %rbp
 	movq %rsp, %rbp
-	subq $24, %rsp
-	movq $4, %rdi
+	subq $8, %rsp
+	movq $10, %rdi
 	movq %rdi, -8(%rbp)
-	movq $2, %rdi
-	movq %rdi, -16(%rbp)
-	movq $3, %rdi
-	movq %rdi, -24(%rbp)
 	movq -8(%rbp), %rdi
 	call print_int
 	call print_space
-	movq -16(%rbp), %rdi
+	movq $S_2, %rdi
+	call print_string
+	call print_space
+	movq $11, %rdi
 	call print_int
 	call print_space
-	movq -24(%rbp), %rdi
-	call print_int
-	addq $24, %rsp
+	movq $S_1, %rdi
+	call print_string
+	addq $8, %rsp
 E_main:
 	movq %rbp, %rsp
 	popq %rbp
@@ -91,3 +90,7 @@ S_space:
 	.string " "
 S_empty:
 	.string ""
+S_2:
+	.string "\n"
+S_1:
+	.string "\n"
