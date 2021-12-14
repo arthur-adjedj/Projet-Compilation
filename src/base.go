@@ -2,7 +2,8 @@ package main
 import "fmt"
 
 func main() {
-	var x = 3
-	_ = x+2
-	fmt.Print(x)
+	var x = 4
+	var y = 2
+	var z = 3
+	fmt.Print(x,y,z)
 }

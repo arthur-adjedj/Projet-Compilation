@@ -182,21 +182,11 @@ let rec expr (env: env) e = match e.expr_desc with
 
   | TEident x ->
       let a = (ind ~ofs:(-8*( x.v_id + env.ofs_this +1 ))  rbp) in
-      print_string ("trying to find "^x.v_name^" in address : ");
-      (convert a) std_formatter ();
-      print_newline ();
       movq a !%rdi
     (* TODO code pour x *) 
   | TEassign ([{expr_desc = TEident x}], [e1]) ->
       let ofse = x.v_id + env.ofs_this+1  in 
-      let a = (ind ~ofs:(-8*ofse) rbp) in
-      print_string ("id of "^x.v_name^" : ");
-      print_int x.v_id;
-      print_string "\noffset of env : ";
-      print_int env.ofs_this;
-      print_string ("\nplace of value "^x.v_name^" in mem: ");
-      (X86_64.convert a) std_formatter ();
-      print_newline ();
+      let a = ind ~ofs:(-8*ofse) rbp in
       expr env e1 ++
       if x.v_name = "_" then nop else movq !%rdi a
 
@@ -205,16 +195,7 @@ let rec expr (env: env) e = match e.expr_desc with
   | TEassign (_, _) ->
       assert false
   | TEblock el ->
-      let rec parcours el = (match el with
-        |[] -> nop
-        |{expr_desc = TEvars(vrs)}::t -> 
-          List.fold_left (fun res v ->(
-            if v.v_name = "_" then nop else
-            (pushq (imm64 0L)) ) ++
-            res
-            ) nop vrs ++ parcours t
-        |h::t -> expr env h ++ (parcours t )) in
-      parcours el
+      List.fold_left (fun x y -> x ++ (expr env y)) nop el
   | TEif (e1, e2, e3) ->
       let thena = new_label () in
       let elsea = new_label () in
@@ -256,15 +237,24 @@ let maxalloc f e =
     |_::t -> nb_vars t
   in List.length f.fn_params + nb_vars e
   
+
+let rec n_vars {expr_desc} = match expr_desc with
+  |TEvars vrs -> List.length vrs
+  |TEblock b -> List.fold_left (fun x y -> x + (n_vars y)) 0 b
+  |_ -> 0
+
 let function_ f e =
   if !debug then eprintf "function %s:@." f.fn_name;
+  let n =  n_vars e in
   (* TODO code pour fonction *) 
   let s = f.fn_name in 
   label ("F_" ^ s) ++ 
   (*rajouter adresses arguments/retours*)
   pushq !%rbp ++
   movq !%rsp !%rbp ++
-  (expr empty_env e) ++
+  subq (imm64  (Int64.of_int (8*n))) !%rsp ++
+  expr empty_env e ++
+  addq (imm64  (Int64.of_int (8*n))) !%rsp ++
   label ("E_" ^ s) ++
   movq !%rbp !%rsp ++
   popq rbp ++
@@ -321,9 +311,19 @@ print_bool:
       mov     $S_true, %rdi
       call    printf
       ret
-1:    mov     $S_false, %rdi
+      mov     $S_false, %rdi
       call    printf
       ret
+allocz:
+      movq    %rdi, %rbx     # callee-save
+        call    malloc
+        testq   %rbx, %rbx
+        jnz     1f
+        ret
+1:      movb    $0, (%rax, %rbx)
+        decq    %rbx
+        jnz     1b
+        ret
 ";
    (* TODO appel malloc de stdlib *)
     data =

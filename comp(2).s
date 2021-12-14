@@ -29,45 +29,45 @@ E_main:
 	ret
 
 print_int_or_nil:
-      test    %rdi, %rdi
-      jz      print_nil
-      movq    (%rdi), %rdi
+        test    %rdi, %rdi
+        jz      print_nil
+        movq    (%rdi), %rdi
 print_int:
-      movq    %rdi, %rsi
-      movq    $S_int, %rdi
-      xorq    %rax, %rax
-      call    printf
-      ret
+        movq    %rdi, %rsi
+        movq    $S_int, %rdi
+        xorq    %rax, %rax
+        call    printf
+        ret
 print_string:
-      test    %rdi, %rdi
-      jz      print_nil
-      mov     %rdi, %rsi
-      mov     $S_string, %rdi
-      xorq    %rax, %rax
-      call    printf
-      ret
+        test    %rdi, %rdi
+        jz      print_nil
+        mov     %rdi, %rsi
+        mov     $S_string, %rdi
+        xorq    %rax, %rax
+        call    printf
+        ret
 print_nil:
-      mov     $S_nil, %rdi
-      xorq    %rax, %rax
-      call    printf
-      ret
+        mov     $S_nil, %rdi
+        xorq    %rax, %rax
+        call    printf
+        ret
 print_space:
-      mov     $S_space, %rdi
-      xorq    %rax, %rax
-      call    printf
-      ret
+        mov     $S_space, %rdi
+        xorq    %rax, %rax
+        call    printf
+        ret
 print_bool:
-      xorq    %rax, %rax
-      test    %rdi, %rdi
-      jz      1f
-      mov     $S_true, %rdi
-      call    printf
-      ret
-      mov     $S_false, %rdi
-      call    printf
-      ret
+        xorq    %rax, %rax
+        test    %rdi, %rdi
+        jz      1f
+        mov     $S_true, %rdi
+        call    printf
+        ret
+1:      mov     $S_false, %rdi
+        call    printf
+        ret
 allocz:
-      movq    %rdi, %rbx     # callee-save
+        movq    %rdi, %rbx     # callee-save
         call    malloc
         testq   %rbx, %rbx
         jnz     1f
