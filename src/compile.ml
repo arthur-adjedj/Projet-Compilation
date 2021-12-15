@@ -162,10 +162,21 @@ let rec expr (env: env) e = match e.expr_desc with
       cmpq (imm64 0L) !%rdi ++
       compile_bool jz
 
-  | TEunop (Uamp, e1) ->
-    (* TODO code pour & *) assert false 
+  | TEunop (Uamp, {expr_desc = TEident x}) ->
+    let ofse = x.v_id + env.ofs_this+1  in 
+    let a = ind ~ofs:(-8*ofse) rbp in
+    movq a !%rdi
+
+  | TEunop (Uamp, {expr_desc = TEdot (e1, {f_name;f_ofs})}) ->
+    expr env (make (TEunop (Uamp,e1)) (Tptr e1.expr_typ)) ++
+    addq (imm f_ofs) !%rdi
+
+  | TEunop (Uamp,e) -> Pretty.expr std_formatter e; assert false
+
   | TEunop (Ustar, e1) ->
-      expr env e1
+      expr env e1 ++
+      movq (ind rdi) !%rdi
+
   | TEprint el ->
       let rec aux l = match l with 
         |[] -> nop
@@ -173,17 +184,18 @@ let rec expr (env: env) e = match e.expr_desc with
           expr env e ++ (
           match e.expr_typ with
             | Tint | Tptr _ -> call "print_int"
-            | Tbool -> call "print_bool"
+            | Tbool ->  call "print_bool"
             | Tstring -> call "print_string"
             | Tstruct s -> aux (htbl_to_list e s.s_fields)
             |_ -> failwith "tptc"
         ) ++ (if t <> [] then (++) (call "print_space") else id)  (aux t)
-      in aux el
+      in comment "begin print" ++ aux el ++ comment "end print"
 
   | TEident x ->
       let a = (ind ~ofs:(-8*( x.v_id + env.ofs_this +1 ))  rbp) in
       movq a !%rdi    
     (* TODO code pour x *) 
+
   | TEassign ([{expr_desc = TEident x}], [e1]) ->
       let ofse = x.v_id + env.ofs_this+1  in 
       let a = ind ~ofs:(-8*ofse) rbp in
@@ -191,9 +203,15 @@ let rec expr (env: env) e = match e.expr_desc with
       if x.v_name = "_" then nop else movq !%rdi a
 
   | TEassign ([lv], [e1]) ->
-    (* TODO code pour x1,... := e1,... *) assert false 
+      expr env (make (TEunop(Uamp,lv)) (Tptr lv.expr_typ)) ++
+      movq !%rdi !%rax ++
+      expr env e1 ++
+      movq !%rdi (ind rax)
+
+    (* TODO code pour x1,... := e1,... *) 
   | TEassign (_, _) ->
       assert false
+
   | TEblock el ->
     let rec parcours el = (match el with
       |[] -> nop
@@ -205,6 +223,7 @@ let rec expr (env: env) e = match e.expr_desc with
           ) nop vrs ++ parcours t
       |h::t -> expr env h ++ (parcours t )) in
     parcours el
+
   | TEif (e1, e2, e3) ->
       let thena = new_label () in
       let elsea = new_label () in
@@ -219,15 +238,31 @@ let rec expr (env: env) e = match e.expr_desc with
 
   | TEfor (e1, e2) ->
      (* TODO code pour for *) assert false
+
   | TEnew ty ->
       let s = sizeof ty in
-      malloc s ++ 
+      movq (imm s) (reg rdi) ++ 
+      call "allocz" ++ 
       movq !%rax !%rdi
+
   | TEcall (f, el) ->
      (* TODO code pour appel fonction *) assert false
-  | TEdot (e1, {f_name;f_ofs}) ->
+
+  | TEdot ({expr_desc = TEident x} as e1, {f_name;f_ofs}) ->
+      print_string "ident : ";
+      Pretty.expr std_formatter e1;
+      print_newline ();
       expr env e1 ++
       movq (ind ~ofs:f_ofs rdi) !%rdi
+
+  | TEdot ({expr_desc = TEunop(Ustar,e1) },{f_name;f_ofs}) -> 
+      print_string "star : ";
+      Pretty.expr std_formatter e1;
+      print_newline ();
+      expr env e1 ++  
+      movq (ind ~ofs:f_ofs rdi) !%rdi
+
+  |TEdot _ -> failwith "tptc"
   | TEvars _ ->
       nop
   | TEreturn [] ->

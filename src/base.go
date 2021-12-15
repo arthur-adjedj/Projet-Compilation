@@ -1,18 +1,18 @@
 package main
-
 import "fmt"
 
 type L struct {
 	x    int
-	next int
+	next *L
 }
 
-func foo (x int) int {
-	return x
-}
 
 func main() {
+	a := new(L)
+	a.x = 12
 	z := new(L)
-	fmt.Print(*z)
+	z.x = 2
+	z.next = a 
+	fmt.Print(*z,*a)
 
 }
