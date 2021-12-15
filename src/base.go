@@ -1,7 +1,18 @@
 package main
+
 import "fmt"
 
+type L struct {
+	x    int
+	next int
+}
+
+func foo (x int) int {
+	return x
+}
+
 func main() {
-	var x = 10
-	fmt.Print(x, "\n", 11, "\n")
+	z := new(L)
+	fmt.Print(*z)
+
 }

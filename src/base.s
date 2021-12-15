@@ -7,16 +7,27 @@ main:
 F_main:
 	pushq %rbp
 	movq %rsp, %rbp
-	subq $8, %rsp
-	movq $10, %rdi
+	pushq $0
+	movq $16, %rdi
+	call malloc
+	movq %rax, %rdi
 	movq %rdi, -8(%rbp)
 	movq -8(%rbp), %rdi
+	movq $S_4, %rdi
+	call print_string
+	call print_space
+	movq -8(%rbp), %rdi
+	movq 0(%rdi), %rdi
 	call print_int
+	call print_space
+	movq $S_3, %rdi
+	call print_string
 	call print_space
 	movq $S_2, %rdi
 	call print_string
 	call print_space
-	movq $11, %rdi
+	movq -8(%rbp), %rdi
+	movq 8(%rdi), %rdi
 	call print_int
 	call print_space
 	movq $S_1, %rdi
@@ -91,6 +102,10 @@ S_space:
 S_empty:
 	.string ""
 S_2:
+	.string "next :"
+S_4:
+	.string "x :"
+S_3:
 	.string "\n"
 S_1:
 	.string "\n"

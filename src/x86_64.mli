@@ -134,7 +134,7 @@ val r15b: [`B] register
 type 'size operand
   (** Le type abstrait des opérandes *)
 
-val convert : [> ] operand -> Stdlib__format.formatter -> unit -> unit 
+val convert : [> ] operand -> Format.formatter -> unit -> unit 
 
 
 val imm: int -> [>] operand

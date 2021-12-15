@@ -79,8 +79,8 @@ let fields h = Hashtbl.fold (fun _ x y -> x::y) h []
 
 let htbl_to_list e h = (*très fier de cette horreur*)
   Hashtbl.fold (fun x y z-> 
-    [make (TEconstant (Cstring (x ^" : ")))Tstring;
-    make (TEdot(e,y)) y.f_typ]@z) h []
+    [make (TEconstant (Cstring (x ^" :"))) Tstring;
+    make (TEdot(e,y)) y.f_typ;make (TEconstant (Cstring ("\n"))) Tstring]@z) h []
 
 
 let adress f var = 
@@ -117,18 +117,18 @@ let rec expr (env: env) e = match e.expr_desc with
         )))
 
   | TEbinop (Blt | Ble | Bgt | Bge as op, e1, e2) -> 
-    expr env e1 ++
-    movq !%rdi !%rax ++
-    expr env e2 ++
-    cmpq !%rdi !%rax ++
-    compile_bool (
-      match op with
-        |Blt -> jl
-        |Ble -> jle
-        |Bgt -> jg
-        |Bge -> jge
-        |_ -> failwith "tptc"
-    )
+      expr env e1 ++
+      movq !%rdi !%rax ++
+      expr env e2 ++
+      cmpq !%rdi !%rax ++
+      compile_bool (
+        match op with
+          |Blt -> jl
+          |Ble -> jle
+          |Bgt -> jg
+          |Bge -> jge
+          |_ -> failwith "tptc"
+      )
 
   | TEbinop (Badd | Bsub | Bmul | Bdiv | Bmod as op, e1, e2) ->
       expr env e1 ++
@@ -165,7 +165,7 @@ let rec expr (env: env) e = match e.expr_desc with
   | TEunop (Uamp, e1) ->
     (* TODO code pour & *) assert false 
   | TEunop (Ustar, e1) ->
-    (* TODO code pour * *) assert false 
+      expr env e1
   | TEprint el ->
       let rec aux l = match l with 
         |[] -> nop
@@ -182,7 +182,7 @@ let rec expr (env: env) e = match e.expr_desc with
 
   | TEident x ->
       let a = (ind ~ofs:(-8*( x.v_id + env.ofs_this +1 ))  rbp) in
-      movq a !%rdi
+      movq a !%rdi    
     (* TODO code pour x *) 
   | TEassign ([{expr_desc = TEident x}], [e1]) ->
       let ofse = x.v_id + env.ofs_this+1  in 
@@ -195,7 +195,16 @@ let rec expr (env: env) e = match e.expr_desc with
   | TEassign (_, _) ->
       assert false
   | TEblock el ->
-      List.fold_left (fun x y -> x ++ (expr env y)) nop el
+    let rec parcours el = (match el with
+      |[] -> nop
+      |{expr_desc = TEvars(vrs)}::t -> 
+        List.fold_left (fun res v ->(
+          if v.v_name = "_" then nop else
+          (pushq (imm64 0L)) ) ++
+          res
+          ) nop vrs ++ parcours t
+      |h::t -> expr env h ++ (parcours t )) in
+    parcours el
   | TEif (e1, e2, e3) ->
       let thena = new_label () in
       let elsea = new_label () in
@@ -211,11 +220,14 @@ let rec expr (env: env) e = match e.expr_desc with
   | TEfor (e1, e2) ->
      (* TODO code pour for *) assert false
   | TEnew ty ->
-     (* TODO code pour new S *) assert false
+      let s = sizeof ty in
+      malloc s ++ 
+      movq !%rax !%rdi
   | TEcall (f, el) ->
      (* TODO code pour appel fonction *) assert false
-  | TEdot (e1, {f_ofs=ofs}) ->
-     (* TODO code pour e.f *) assert false
+  | TEdot (e1, {f_name;f_ofs}) ->
+      expr env e1 ++
+      movq (ind ~ofs:f_ofs rdi) !%rdi
   | TEvars _ ->
       nop
   | TEreturn [] ->
@@ -252,7 +264,6 @@ let function_ f e =
   (*rajouter adresses arguments/retours*)
   pushq !%rbp ++
   movq !%rsp !%rbp ++
-  subq (imm64  (Int64.of_int (8*n))) !%rsp ++
   expr empty_env e ++
   addq (imm64  (Int64.of_int (8*n))) !%rsp ++
   label ("E_" ^ s) ++
