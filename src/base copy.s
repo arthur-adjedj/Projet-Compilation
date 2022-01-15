@@ -14,14 +14,19 @@ F_main:
 	movq $10, %rdi
 	movq %rdi, -8(%rbp)
 #end assign of ident : x
+	pushq $0
+#start assign of ident : y
+#Uamp of x
+	movq %rbp, %rdi
+	addq $-8, %rdi
+	movq %rdi, -16(%rbp)
+#end assign of ident : y
+#start assign of ident : y
+#ident of y
+	movq -16(%rbp), %rdi
+	movq %rdi, -16(%rbp)
+#end assign of ident : y
 #begin print
-#ident of x
-	movq -8(%rbp), %rdi
-	call print_int
-	call print_space
-	movq $S_2, %rdi
-	call print_string
-	call print_space
 #ident of x
 	movq -8(%rbp), %rdi
 	call print_int
@@ -31,7 +36,7 @@ F_main:
 #end print
 #end block
 #end block
-	addq $8, %rsp
+	addq $16, %rsp
 E_main:
 	movq %rbp, %rsp
 	popq %rbp
@@ -100,7 +105,5 @@ S_space:
 	.string " "
 S_empty:
 	.string ""
-S_2:
-	.string "\n"
 S_1:
 	.string "\n"

@@ -89,10 +89,17 @@ let rw_empty = {
 let rw_add v e rw =
   { rw with subst = Vmap.add v e rw.subst }
 
+let htbl_to_list e e' h = (*très fier de cette horreur*)
+  let a = Hashtbl.fold (fun x y z-> 
+    (make (TEassign([make (TEdot(e,y)) y.f_typ ],[make (TEdot(e',y)) y.f_typ])) tvoid)::z) h [] in 
+   a
+
 
 let rec expr rw e =
   let _ty = e.expr_typ in
   let mk d = { e with expr_desc = d } in
+  Pretty.expr Format.std_formatter e;
+  Format.pp_print_newline Format.std_formatter ();
   match e.expr_desc with
   | TEskip
   | TEnil
@@ -122,7 +129,7 @@ let rec expr rw e =
      mk (TEdot (expr rw e1, f))
   | TEassign ([], _) | TEassign (_, []) ->
      assert false
-  | TEassign ([lvl], [e]) ->
+  |TEassign ([lvl],[e]) -> 
      mk (TEassign ([expr rw lvl], [expr rw e]))
   | TEassign (lvl, [{expr_desc=TEcall (g, [{expr_desc=TEcall(f, el)}])}])
        when many_results f ->

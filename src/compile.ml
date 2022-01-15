@@ -58,8 +58,6 @@ type env = {
 }
 
 
-
-
 let empty_env =
   { exit_label = ""; ofs_this = -1; nb_locals = ref 0; next_local = 0 }
 
@@ -83,9 +81,6 @@ let htbl_to_list e h = (*très fier de cette horreur*)
     make (TEdot(e,y)) y.f_typ;make (TEconstant (Cstring ("\n"))) Tstring]@z) h []
 
 
-let adress f var = 
-  -8*(List.length f.fn_params + 2 + var.v_id)
-
 let rec expr (env: env) e = match e.expr_desc with
   | TEskip ->
       nop
@@ -108,14 +103,14 @@ let rec expr (env: env) e = match e.expr_desc with
             e2)))
 
   | TEbinop (Bor, e1, e2) ->
-    expr env 
-    (mk_bool 
-      (TEif(
-        e1,
-        mk_bool (TEconstant (Cbool true)),        
-        e2
-        )))
-
+      expr env 
+      (mk_bool 
+        (TEif(
+          e1,
+          mk_bool (TEconstant (Cbool true)),        
+          e2
+          )))
+  
   | TEbinop (Blt | Ble | Bgt | Bge as op, e1, e2) -> 
       expr env e1 ++
       movq !%rdi !%rax ++
@@ -127,7 +122,7 @@ let rec expr (env: env) e = match e.expr_desc with
           |Ble -> jle
           |Bgt -> jg
           |Bge -> jge
-          |_ -> failwith "tptc"
+          |_ -> error dummy_loc "tptc comp"
       )
 
   | TEbinop (Badd | Bsub | Bmul | Bdiv | Bmod as op, e1, e2) ->
@@ -144,14 +139,14 @@ let rec expr (env: env) e = match e.expr_desc with
         | Bmod -> movq (imm64 0L) !%rdx ++
                   idivq !%rdi  ++
                   movq !%rdx !%rdi
-        |_ -> failwith "tptc")
+        |_ -> error dummy_loc "tptc op")
 
   | TEbinop (Beq | Bne as op, e1, e2) ->
       expr env e1 ++
       movq !%rdi !%rax ++
       expr env e2 ++
       cmpq !%rdi !%rax ++
-      compile_bool (match op with |Beq -> je | Bne -> jne |_ -> failwith "tptc")
+      compile_bool (match op with |Beq -> je | Bne -> jne |_ -> error dummy_loc "tptc eq")
 
   | TEunop (Uneg, e1) ->
       expr env e1 ++
@@ -163,14 +158,19 @@ let rec expr (env: env) e = match e.expr_desc with
       compile_bool jz
 
   | TEunop (Uamp, {expr_desc = TEident x}) ->
-    let ofse = x.v_id + env.ofs_this+1  in 
-    let a = ind ~ofs:(-8*ofse) rbp in
-    movq a !%rdi
+      comment ("Uamp of "^x.v_name) ++
+      let ofse = x.v_id + env.ofs_this+1  in 
+      movq !%rbp !%rdi ++
+      addq (imm (-8*ofse)) !%rdi
 
   | TEunop (Uamp, {expr_desc = TEdot (e1, {f_name;f_ofs})}) ->
-    expr env (make (TEunop (Uamp,e1)) (Tptr e1.expr_typ)) ++
-    addq (imm f_ofs) !%rdi
-
+      expr env (make (TEunop (Uamp,e1)) (Tptr e1.expr_typ)) ++
+      movq (ind rdi) !%rdi ++
+      addq (imm f_ofs) !%rdi
+  | TEunop (Uamp, {expr_desc = TEunop(Ustar,e1)}) ->
+      comment "amp of *" ++
+      expr env e1 
+    
   | TEunop (Uamp,e) -> Pretty.expr std_formatter e; assert false
 
   | TEunop (Ustar, e1) ->
@@ -187,46 +187,55 @@ let rec expr (env: env) e = match e.expr_desc with
             | Tbool ->  call "print_bool"
             | Tstring -> call "print_string"
             | Tstruct s -> aux (htbl_to_list e s.s_fields)
-            |_ -> failwith "tptc"
+            |_ -> error dummy_loc "tptc print"
         ) ++ (if t <> [] then (++) (call "print_space") else id)  (aux t)
       in comment "begin print" ++ aux el ++ comment "end print"
 
   | TEident x ->
-      let a = (ind ~ofs:(-8*( x.v_id + env.ofs_this +1 ))  rbp) in
+      let a = (ind ~ofs:(-8*( x.v_id + env.ofs_this - env.next_local + 1))  rbp) in
+      comment ("ident of "^x.v_name) ++
       movq a !%rdi    
-    (* TODO code pour x *) 
 
   | TEassign ([{expr_desc = TEident x}], [e1]) ->
-      let ofse = x.v_id + env.ofs_this+1  in 
+    comment ("start assign of ident : "^x.v_name) ++
+      let ofse = x.v_id + env.ofs_this +1  in 
       let a = ind ~ofs:(-8*ofse) rbp in
       expr env e1 ++
-      if x.v_name = "_" then nop else movq !%rdi a
+      (if x.v_name = "_" then nop else movq !%rdi a)
+      ++ comment ("end assign of ident : "^x.v_name)
+
 
   | TEassign ([lv], [e1]) ->
-      expr env (make (TEunop(Uamp,lv)) (Tptr lv.expr_typ)) ++
-      movq !%rdi !%rax ++
+    comment "start assign" ++
       expr env e1 ++
-      movq !%rdi (ind rax)
+      movq !%rdi !%rax ++
+      expr env (make (TEunop(Uamp,lv)) (Tptr lv.expr_typ)) ++
+      movq (ind rdi) !%rax ++
+    comment "end assign"
 
-    (* TODO code pour x1,... := e1,... *) 
   | TEassign (_, _) ->
       assert false
 
   | TEblock el ->
-    let rec parcours el = (match el with
-      |[] -> nop
-      |{expr_desc = TEvars(vrs)}::t -> 
-        List.fold_left (fun res v ->(
-          if v.v_name = "_" then nop else
-          (pushq (imm64 0L)) ) ++
-          res
-          ) nop vrs ++ parcours t
-      |h::t -> expr env h ++ (parcours t )) in
-    parcours el
+    comment "start block" ++
+
+      let rec parcours el = (match el with
+        |[] -> nop
+        |{expr_desc = TEvars(vrs)}::t -> 
+          List.fold_left (fun res v ->(
+            if v.v_name = "_" then nop else
+            (incr env.nb_locals;(pushq (imm64 0L))) ) ++
+            res
+            ) nop vrs ++ parcours t
+        |h::t -> expr env h ++ (parcours t )) in
+      parcours el ++
+
+      comment "end block"
 
   | TEif (e1, e2, e3) ->
       let thena = new_label () in
       let elsea = new_label () in
+      comment "start if" ++
       expr env e1 ++
       cmpq (imm64 0L) !%rdi  ++
       je elsea ++
@@ -234,10 +243,23 @@ let rec expr (env: env) e = match e.expr_desc with
       jmp thena ++
       label elsea ++
       expr env e3 ++
-      label thena
+      label thena ++
+      comment "end if"
+
 
   | TEfor (e1, e2) ->
-     (* TODO code pour for *) assert false
+      let l1 = new_label () in
+      let l2 = new_label () in 
+      comment "start for" ++
+      label l1 ++
+      expr env e1 ++
+      testq !%rdi !%rdi++
+      jz l2 ++
+      expr env e2 ++
+      jmp l1 ++
+      label l2 ++
+      comment "end for"
+
 
   | TEnew ty ->
       let s = sizeof ty in
@@ -246,23 +268,25 @@ let rec expr (env: env) e = match e.expr_desc with
       movq !%rax !%rdi
 
   | TEcall (f, el) ->
-     (* TODO code pour appel fonction *) assert false
+
+    (*when f called with args el, arguments need to be pushed on the stack, and rbp need to be moved at the right place.
+    after execution of the call, rbp/rsp need to be reset to their place before all happened*)
+      let n = List.length el in
+      print_int n;
+      print_newline ();
+      List.fold_left (fun x y -> (expr env y) ++ x) nop el ++
+      call ("F_"^f.fn_name)
+      (* TODO code pour appel fonction *) 
 
   | TEdot ({expr_desc = TEident x} as e1, {f_name;f_ofs}) ->
-      print_string "ident : ";
-      Pretty.expr std_formatter e1;
-      print_newline ();
       expr env e1 ++
       movq (ind ~ofs:f_ofs rdi) !%rdi
 
   | TEdot ({expr_desc = TEunop(Ustar,e1) },{f_name;f_ofs}) -> 
-      print_string "star : ";
-      Pretty.expr std_formatter e1;
-      print_newline ();
       expr env e1 ++  
       movq (ind ~ofs:f_ofs rdi) !%rdi
 
-  |TEdot _ -> failwith "tptc"
+  |TEdot _ as e -> Pretty.expr std_formatter (make e tvoid)  ; error dummy_loc "tptc dot"
   | TEvars _ ->
       nop
   | TEreturn [] ->
@@ -270,9 +294,14 @@ let rec expr (env: env) e = match e.expr_desc with
   | TEreturn [e1] ->
     (* TODO code pour return e1,... *) assert false
   | TEreturn _ ->
-     assert false
-  | TEincdec (e1, op) ->
-    (* TODO code pour return e++, e-- *) assert false
+      assert false
+  | TEincdec (e1, Inc) ->
+      expr env (make (TEunop(Uamp,e1)) (Tptr e1.expr_typ)) ++
+      addq (imm 1) (ind rdi)
+  | TEincdec (e1, Dec) ->
+      expr env (make (TEunop(Uamp,e1)) (Tptr e1.expr_typ)) ++
+      subq (imm 1) (ind rdi)
+
 
 
 
@@ -286,35 +315,40 @@ let maxalloc f e =
   
 
 let rec n_vars {expr_desc} = match expr_desc with
-  |TEvars vrs -> List.length vrs
+  |TEvars vrs -> List.length (List.filter (fun x -> x.v_name <> "_") vrs)
   |TEblock b -> List.fold_left (fun x y -> x + (n_vars y)) 0 b
   |_ -> 0
 
-let function_ f e =
+let function_ f e envg =
   if !debug then eprintf "function %s:@." f.fn_name;
   let n =  n_vars e in
   (* TODO code pour fonction *) 
   let s = f.fn_name in 
+  let n_params = List.length f.fn_params in
+  let env = { exit_label = ""; ofs_this = n_params - 1; nb_locals = ref 0; next_local = !envg.next_local } in
+  envg := {!envg with next_local = env.next_local + n};
   label ("F_" ^ s) ++ 
-  (*rajouter adresses arguments/retours*)
   pushq !%rbp ++
   movq !%rsp !%rbp ++
-  expr empty_env e ++
+  expr env e ++
   addq (imm64  (Int64.of_int (8*n))) !%rsp ++
   label ("E_" ^ s) ++
   movq !%rbp !%rsp ++
   popq rbp ++
   ret
 
-let decl code = function
-  | TDfunction (f, e) -> code ++ function_ f e
+let decl env code = 
+  function
+  | TDfunction (f, e) -> code ++ function_ f e env
   | TDstruct _ -> code
 
 
 let file ?debug:(b=false) dl =
   debug := b;
+  let env = ref empty_env in
+
   (* TODO calcul offset champs *)
-  (* TODO code fonctions *) let funs = List.fold_left decl nop dl in
+  (* TODO code fonctions *) let funs = List.fold_left (decl env) nop dl in
   { text =
       globl "main" ++ label "main" ++
       call "F_main" ++
@@ -371,7 +405,6 @@ allocz:
         jnz     1b
         ret
 ";
-   (* TODO appel malloc de stdlib *)
     data =
       label "S_int" ++ string "%ld" ++
       label "S_string" ++ string "%s" ++
