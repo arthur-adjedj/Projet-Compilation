@@ -198,7 +198,6 @@ module Env = struct
   let check_unused () =
     let check v =
       if v.v_name <> "_" && not v.v_used then (
-        Pretty.(print_list comma var) std_formatter !all_vars;
         error v.v_loc ("unused variable "^v.v_name)) in
     List.iter check !all_vars
 
@@ -273,6 +272,13 @@ let rec typ_to_ptyp loc = function
   | Tstruct s -> PTident (dummy s.s_name)
   | x -> print_endline (typstr x); error loc "club penguin is kil"
 
+let rec flatten_length = function
+  |[] -> 0
+  |{pexpr_desc = PEcall(f,_)}::t -> let {pf_typ = a} = Funcs.find f.id in (List.length a) + flatten_length t
+  |{pexpr_desc = PEreturn l}::t -> flatten_length l + flatten_length t
+  |h::t -> 1 + flatten_length t
+
+
 
 let ret_type = ref tvoid
 
@@ -340,15 +346,16 @@ and expr_desc env loc = function
       let l = List.map (fun x -> fst (expr env x)) el in
       TEprint l, tvoid, false
   | PEcall ({id="new"}, [{pexpr_desc=PEident {id;loc}}])->
-      let ty =  try Tstruct (Structs.find id) with _ -> error loc ("no such type " ^ id)
+      let ty =  try Tstruct (Structs.find id) with _ -> 
+        error loc ("no such type " ^ id)
       in TEnew ty, Tptr ty, false
   | PEcall ({id="new"}, _) ->
       error loc "new expects a type"
   | PEcall (id, el) ->(
       try 
         let af = Funcs.find id.id in
-        if List.length af.pf_params <> List.length el then 
-          error loc "arity error";
+        if List.length af.pf_params <> flatten_length el then  (
+          error loc "arity error");
         let f = 
           {fn_name = af.pf_name.id;
           fn_params = List.map 
@@ -363,7 +370,8 @@ and expr_desc env loc = function
           let exprs = List.map (fun x -> fst (expr env x)) el in
           let ty = l_to_typ f.fn_typ in
         TEcall(f,exprs),ty,false
-      with _ -> error loc "fun not found")
+      with Error _ as e -> raise e 
+           | _ -> error loc ("function "^id.id^" not found"))
   | PEfor (e, b) ->
       let (ne,r1) = expr env e
       and (nb,r2) =  expr env b in
@@ -406,6 +414,7 @@ and expr_desc env loc = function
         | {pexpr_desc = PEident {id=id}; pexpr_loc} -> 
           (try 
             let v = Env.find id !env in
+            v.v_used <- true;
             {expr_desc = TEident v;expr_typ = v.v_typ}
           with Not_found -> error pexpr_loc ("unbound variable in assign: " ^ id)) 
         | {pexpr_desc = PEdot(e,id); pexpr_loc} -> 

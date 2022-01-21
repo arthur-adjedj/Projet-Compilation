@@ -181,10 +181,9 @@ let rec typ fmt = function
   | Tstring -> fprintf fmt "string"
   | Tstruct s -> fprintf fmt "%s" s.s_name
   | Tptr ty -> fprintf fmt "*%a" typ ty
-  |_ -> ()
+  | Tmany l -> List.iter (fun x -> typ fmt x;fprintf std_formatter " ; ") l
 
 
-(* TODO autres types utilises par l'analyse semantique *)
 
 let rec expr fmt e = match e.expr_desc with
   | TEskip -> ()

@@ -24,7 +24,6 @@
 
 *)
 
-open Format
 open Ast
 open Tast
 open X86_64
@@ -53,13 +52,14 @@ let new_label =
 type env = {
   exit_label: string;
   ofs_this: int;
-  nb_locals: int ref; (* maximum *)
+  mutable nb_locals: int; (* maximum *)
   next_local: int; (* 0, 1, ... *)
+  mutable positions : (int*int) list;
 }
 
 
 let empty_env =
-  { exit_label = ""; ofs_this = -1; nb_locals = ref 0; next_local = 0 }
+  { exit_label = ""; ofs_this = -1; nb_locals = 0; next_local = 0 ;positions = []}
 
 let mk_bool d = { expr_desc = d; expr_typ = Tbool }
 
@@ -76,9 +76,34 @@ let compile_bool f =
 let fields h = Hashtbl.fold (fun _ x y -> x::y) h []
 
 let htbl_to_list e h = (*très fier de cette horreur*)
-  Hashtbl.fold (fun x y z-> 
-    [make (TEconstant (Cstring (x ^" :"))) Tstring;
-    make (TEdot(e,y)) y.f_typ;make (TEconstant (Cstring ("\n"))) Tstring]@z) h []
+  (make (TEconstant (Cstring ("{"))) Tstring)::(
+    Hashtbl.fold (fun x y z-> 
+      [make (TEconstant (Cstring (x ^" :"))) Tstring;
+      make (TEdot(e,y)) y.f_typ]@z) h 
+    [make (TEconstant (Cstring ("}"))) Tstring])
+
+let print_int_int (a,b) = 
+  print_string "(";
+  print_int a;
+  print_string ",";
+  print_int b;
+  print_string ")"
+
+let print_list f l= 
+    let rec aux = function
+    |[] -> print_endline "]"
+    |[x] -> f x; print_endline "]"
+    |h::t -> f h; print_string ";"; aux t in
+    print_string "["; aux l
+
+
+let pos x env = 
+  let rec aux = function 
+    |[] -> print_endline x.v_name;print_int x.v_id; print_list print_int_int env.positions;error dummy_loc "this shouldn't happen"
+    |(a,b)::t -> if a=x.v_id then -8*(b) else aux t in
+  aux env.positions
+  
+let is_not_newline e = e.expr_desc <> TEconstant (Cstring ("\n"))
 
 
 let rec expr (env: env) e = match e.expr_desc with
@@ -113,9 +138,9 @@ let rec expr (env: env) e = match e.expr_desc with
   
   | TEbinop (Blt | Ble | Bgt | Bge as op, e1, e2) -> 
       expr env e1 ++
-      movq !%rdi !%rax ++
+      movq !%rdi !%rsi ++
       expr env e2 ++
-      cmpq !%rdi !%rax ++
+      cmpq !%rdi !%rsi ++
       compile_bool (
         match op with
           |Blt -> jl
@@ -127,15 +152,15 @@ let rec expr (env: env) e = match e.expr_desc with
 
   | TEbinop (Badd | Bsub | Bmul | Bdiv | Bmod as op, e1, e2) ->
       expr env e1 ++
-      movq !%rdi !%rax ++
+      movq !%rdi !%rsi ++
       expr env e2 ++
       (match op with
-        | Badd -> addq !%rax !%rdi
-        | Bsub -> subq !%rax !%rdi
-        | Bmul -> imulq !%rax !%rdi
+        | Badd -> addq !%rsi !%rdi
+        | Bsub -> subq !%rsi !%rdi
+        | Bmul -> imulq !%rsi !%rdi
         | Bdiv -> movq (imm64 0L) !%rdx ++
                   idivq !%rdi  ++
-                  movq !%rax !%rdi
+                  movq !%rsi !%rdi
         | Bmod -> movq (imm64 0L) !%rdx ++
                   idivq !%rdi  ++
                   movq !%rdx !%rdi
@@ -143,9 +168,9 @@ let rec expr (env: env) e = match e.expr_desc with
 
   | TEbinop (Beq | Bne as op, e1, e2) ->
       expr env e1 ++
-      movq !%rdi !%rax ++
+      movq !%rdi !%rsi ++
       expr env e2 ++
-      cmpq !%rdi !%rax ++
+      cmpq !%rdi !%rsi ++
       compile_bool (match op with |Beq -> je | Bne -> jne |_ -> error dummy_loc "tptc eq")
 
   | TEunop (Uneg, e1) ->
@@ -158,20 +183,25 @@ let rec expr (env: env) e = match e.expr_desc with
       compile_bool jz
 
   | TEunop (Uamp, {expr_desc = TEident x}) ->
-      comment ("Uamp of "^x.v_name) ++
-      let ofse = x.v_id + env.ofs_this+1  in 
       movq !%rbp !%rdi ++
-      addq (imm (-8*ofse)) !%rdi
+      if x.v_name = "_" then 
+      movq (imm 0) !%rdi  else
+      addq (imm (pos x env)) !%rdi
+  
+ | TEunop (Uamp, {expr_desc = TEdot ({expr_desc = TEunop(Ustar,e1)}, {f_name;f_ofs})}) ->
+        expr env (make (TEunop (Uamp,e1)) (Tptr e1.expr_typ)) ++
+        movq (ind rdi) !%rdi ++
+        addq (imm f_ofs) !%rdi    
 
   | TEunop (Uamp, {expr_desc = TEdot (e1, {f_name;f_ofs})}) ->
       expr env (make (TEunop (Uamp,e1)) (Tptr e1.expr_typ)) ++
       movq (ind rdi) !%rdi ++
       addq (imm f_ofs) !%rdi
+  
   | TEunop (Uamp, {expr_desc = TEunop(Ustar,e1)}) ->
-      comment "amp of *" ++
       expr env e1 
     
-  | TEunop (Uamp,e) -> Pretty.expr std_formatter e; assert false
+  | TEunop (Uamp,e) -> assert false
 
   | TEunop (Ustar, e1) ->
       expr env e1 ++
@@ -183,59 +213,47 @@ let rec expr (env: env) e = match e.expr_desc with
         |e::t ->
           expr env e ++ (
           match e.expr_typ with
-            | Tint | Tptr _ -> call "print_int"
             | Tbool ->  call "print_bool"
             | Tstring -> call "print_string"
-            | Tstruct s -> aux (htbl_to_list e s.s_fields)
+            | Tstruct s | Tptr (Tstruct s) -> aux (htbl_to_list e s.s_fields)
+            | Tint | Tptr _ -> call "print_int"
             |_ -> error dummy_loc "tptc print"
-        ) ++ (if t <> [] then (++) (call "print_space") else id)  (aux t)
-      in comment "begin print" ++ aux el ++ comment "end print"
+        ) ++ (if t <> [] && is_not_newline (List.hd t) then (++) (call "print_space") else id)  (aux t)
+      in aux el ++ call "print_space"
 
   | TEident x ->
-      let a = (ind ~ofs:(-8*( x.v_id + env.ofs_this - env.next_local + 1))  rbp) in
-      comment ("ident of "^x.v_name) ++
-      movq a !%rdi    
+      movq (ind ~ofs:(pos x env)  rbp) !%rdi    
 
   | TEassign ([{expr_desc = TEident x}], [e1]) ->
-    comment ("start assign of ident : "^x.v_name) ++
-      let ofse = x.v_id + env.ofs_this +1  in 
-      let a = ind ~ofs:(-8*ofse) rbp in
       expr env e1 ++
-      (if x.v_name = "_" then nop else movq !%rdi a)
-      ++ comment ("end assign of ident : "^x.v_name)
-
+      (if x.v_name = "_" then nop else movq !%rdi (ind ~ofs:(pos x env) rbp))
 
   | TEassign ([lv], [e1]) ->
-    comment "start assign" ++
       expr env e1 ++
-      movq !%rdi !%rax ++
+      movq !%rdi !%r12 ++
       expr env (make (TEunop(Uamp,lv)) (Tptr lv.expr_typ)) ++
-      movq (ind rdi) !%rax ++
-    comment "end assign"
+      movq !%r12 (ind rdi) 
 
   | TEassign (_, _) ->
       assert false
 
   | TEblock el ->
-    comment "start block" ++
-
       let rec parcours el = (match el with
         |[] -> nop
-        |{expr_desc = TEvars(vrs)}::t -> 
-          List.fold_left (fun res v ->(
+        |{expr_desc = TEvars(vrs)}::t ->
+          let vars =  List.fold_left (fun res v ->( 
             if v.v_name = "_" then nop else
-            (incr env.nb_locals;(pushq (imm64 0L))) ) ++
+            (env.positions <- (v.v_id,env.nb_locals)::env.positions;
+              env.nb_locals <- env.nb_locals + 1;(pushq (imm64 0L))) ) ++
             res
-            ) nop vrs ++ parcours t
+            ) nop vrs in 
+          vars ++ parcours t
         |h::t -> expr env h ++ (parcours t )) in
-      parcours el ++
-
-      comment "end block"
+      parcours el 
 
   | TEif (e1, e2, e3) ->
       let thena = new_label () in
       let elsea = new_label () in
-      comment "start if" ++
       expr env e1 ++
       cmpq (imm64 0L) !%rdi  ++
       je elsea ++
@@ -243,23 +261,18 @@ let rec expr (env: env) e = match e.expr_desc with
       jmp thena ++
       label elsea ++
       expr env e3 ++
-      label thena ++
-      comment "end if"
-
+      label thena 
 
   | TEfor (e1, e2) ->
       let l1 = new_label () in
       let l2 = new_label () in 
-      comment "start for" ++
       label l1 ++
       expr env e1 ++
       testq !%rdi !%rdi++
       jz l2 ++
       expr env e2 ++
       jmp l1 ++
-      label l2 ++
-      comment "end for"
-
+      label l2 
 
   | TEnew ty ->
       let s = sizeof ty in
@@ -268,36 +281,47 @@ let rec expr (env: env) e = match e.expr_desc with
       movq !%rax !%rdi
 
   | TEcall (f, el) ->
-
     (*when f called with args el, arguments need to be pushed on the stack, and rbp need to be moved at the right place.
     after execution of the call, rbp/rsp need to be reset to their place before all happened*)
-      let n = List.length el in
-      print_int n;
-      print_newline ();
-      List.fold_left (fun x y -> (expr env y) ++ x) nop el ++
-      call ("F_"^f.fn_name)
-      (* TODO code pour appel fonction *) 
+      let rec parcours el = match el with
+        |[] -> nop
+        |e::q -> let a = parcours q in
+                 a ++
+                 expr env e ++
+                 pushq (reg rdi)
+      in
+      parcours el ++
+      call ("F_" ^ f.fn_name) ++
+      movq !%rax !%rdi ++
+      addq (imm (8 * (List.length el))) (reg rsp)
 
-  | TEdot ({expr_desc = TEident x} as e1, {f_name;f_ofs}) ->
+  | TEdot ({expr_desc = (TEident _ | TEdot _ | TEcall _) } as e1, {f_name;f_ofs}) ->
       expr env e1 ++
       movq (ind ~ofs:f_ofs rdi) !%rdi
 
-  | TEdot ({expr_desc = TEunop(Ustar,e1) },{f_name;f_ofs}) -> 
-      expr env e1 ++  
-      movq (ind ~ofs:f_ofs rdi) !%rdi
+  | TEdot ({expr_desc = TEunop(Ustar,e1) },f) -> 
+      expr env {e with expr_desc =(TEdot(e1,f))}
 
-  |TEdot _ as e -> Pretty.expr std_formatter (make e tvoid)  ; error dummy_loc "tptc dot"
+  |TEdot (a,_) -> Pretty.expr Format.std_formatter a;error dummy_loc "tptc dot"
+
   | TEvars _ ->
       nop
+
   | TEreturn [] ->
-    (* TODO code pour return e *) assert false
+    call ("E_"^env.exit_label)
+
   | TEreturn [e1] ->
-    (* TODO code pour return e1,... *) assert false
+      expr env e1 ++
+      movq !%rdi !%rax ++
+      call ("E_"^env.exit_label)
+
   | TEreturn _ ->
       assert false
+
   | TEincdec (e1, Inc) ->
       expr env (make (TEunop(Uamp,e1)) (Tptr e1.expr_typ)) ++
       addq (imm 1) (ind rdi)
+
   | TEincdec (e1, Dec) ->
       expr env (make (TEunop(Uamp,e1)) (Tptr e1.expr_typ)) ++
       subq (imm 1) (ind rdi)
@@ -319,13 +343,17 @@ let rec n_vars {expr_desc} = match expr_desc with
   |TEblock b -> List.fold_left (fun x y -> x + (n_vars y)) 0 b
   |_ -> 0
 
+let rec pos_of_args ?n:(n=(-2)) =
+  function 
+    |[] -> []
+    |v::t -> (v.v_id,n)::(pos_of_args ~n:(n-1) t)
+
 let function_ f e envg =
-  if !debug then eprintf "function %s:@." f.fn_name;
+  if !debug then Format.eprintf "function %s:@." f.fn_name;
   let n =  n_vars e in
-  (* TODO code pour fonction *) 
   let s = f.fn_name in 
   let n_params = List.length f.fn_params in
-  let env = { exit_label = ""; ofs_this = n_params - 1; nb_locals = ref 0; next_local = !envg.next_local } in
+  let env = { exit_label = f.fn_name ; ofs_this = (n_params +2); nb_locals = 1; next_local = !envg.next_local ;positions = pos_of_args (List.rev f.fn_params)} in
   envg := {!envg with next_local = env.next_local + n};
   label ("F_" ^ s) ++ 
   pushq !%rbp ++
@@ -347,8 +375,7 @@ let file ?debug:(b=false) dl =
   debug := b;
   let env = ref empty_env in
 
-  (* TODO calcul offset champs *)
-  (* TODO code fonctions *) let funs = List.fold_left (decl env) nop dl in
+  let funs = List.fold_left (decl env) nop dl in
   { text =
       globl "main" ++ label "main" ++
       call "F_main" ++
@@ -391,7 +418,7 @@ print_bool:
       mov     $S_true, %rdi
       call    printf
       ret
-      mov     $S_false, %rdi
+1:      mov     $S_false, %rdi
       call    printf
       ret
 allocz:
@@ -413,6 +440,7 @@ allocz:
       label "S_nil" ++ string "<nil>" ++
       label "S_space" ++ string " " ++
       label "S_empty" ++ string "" ++
+
       (Hashtbl.fold (fun l s d -> label l ++ string s ++ d) strings nop)
     ;
   }

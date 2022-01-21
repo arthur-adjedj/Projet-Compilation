@@ -7,36 +7,173 @@ main:
 F_main:
 	pushq %rbp
 	movq %rsp, %rbp
-#start block
-#start block
 	pushq $0
-#start assign of ident : x
-	movq $10, %rdi
+	movq $16, %rdi
+	call allocz
+	movq %rax, %rdi
 	movq %rdi, -8(%rbp)
-#end assign of ident : x
-	pushq $0
-#start assign of ident : y
-#Uamp of x
+	movq $1, %rdi
+	movq %rdi, %r12
+#Uamp of aux1
 	movq %rbp, %rdi
 	addq $-8, %rdi
-	movq %rdi, -16(%rbp)
-#end assign of ident : y
-#start assign of ident : y
-#ident of y
-	movq -16(%rbp), %rdi
-	movq %rdi, -16(%rbp)
-#end assign of ident : y
+	movq 0(%rdi), %rdi
+	addq $0, %rdi
+	movq %r12, 0(%rdi)
+	movq $2, %rdi
+	movq %rdi, %r12
+#Uamp of aux1
+	movq %rbp, %rdi
+	addq $-8, %rdi
+	movq 0(%rdi), %rdi
+	addq $8, %rdi
+	movq %r12, 0(%rdi)
 #begin print
-#ident of x
+#ident of aux1
 	movq -8(%rbp), %rdi
+	movq 0(%rdi), %rdi
+	call print_int
+	call print_space
+#ident of aux1
+	movq -8(%rbp), %rdi
+	movq 8(%rdi), %rdi
+	call print_int
+	call print_space
+	movq $S_2, %rdi
+	call print_string
+	call print_space
+#end print
+	pushq $0
+	movq $16, %rdi
+	call allocz
+	movq %rax, %rdi
+	movq %rdi, -16(%rbp)
+#ident of aux1
+	movq -8(%rbp), %rdi
+	movq 0(%rdi), %rdi
+	movq %rdi, %rsi
+	movq $2, %rdi
+	addq %rsi, %rdi
+	movq %rdi, %r12
+#Uamp of aux2
+	movq %rbp, %rdi
+	addq $-16, %rdi
+	movq 0(%rdi), %rdi
+	addq $0, %rdi
+	movq %r12, 0(%rdi)
+#ident of aux1
+	movq -8(%rbp), %rdi
+	movq 8(%rdi), %rdi
+	movq %rdi, %rsi
+	movq $2, %rdi
+	addq %rsi, %rdi
+	movq %rdi, %r12
+#Uamp of aux2
+	movq %rbp, %rdi
+	addq $-16, %rdi
+	movq 0(%rdi), %rdi
+	addq $8, %rdi
+	movq %r12, 0(%rdi)
+#begin print
+#ident of aux2
+	movq -16(%rbp), %rdi
+	movq 0(%rdi), %rdi
+	call print_int
+	call print_space
+#ident of aux2
+	movq -16(%rbp), %rdi
+	movq 8(%rdi), %rdi
 	call print_int
 	call print_space
 	movq $S_1, %rdi
 	call print_string
+	call print_space
 #end print
-#end block
-#end block
-	addq $16, %rsp
+	pushq $0
+	movq $16, %rdi
+	call allocz
+	movq %rax, %rdi
+	movq %rdi, -24(%rbp)
+#ident of aux2
+	movq -16(%rbp), %rdi
+	movq 0(%rdi), %rdi
+	movq %rdi, %r12
+#Uamp of aux3
+	movq %rbp, %rdi
+	addq $-24, %rdi
+	movq 0(%rdi), %rdi
+	addq $0, %rdi
+	movq %r12, 0(%rdi)
+#ident of aux2
+	movq -16(%rbp), %rdi
+	movq 8(%rdi), %rdi
+	movq %rdi, %r12
+#Uamp of aux3
+	movq %rbp, %rdi
+	addq $-24, %rdi
+	movq 0(%rdi), %rdi
+	addq $8, %rdi
+	movq %r12, 0(%rdi)
+#ident of aux3
+	movq -24(%rbp), %rdi
+	movq 0(%rdi), %rdi
+	movq %rdi, %rsi
+	movq $2, %rdi
+	addq %rsi, %rdi
+	movq %rdi, %r12
+#Uamp of aux3
+	movq %rbp, %rdi
+	addq $-24, %rdi
+	movq 0(%rdi), %rdi
+	addq $0, %rdi
+	movq %r12, 0(%rdi)
+#ident of aux3
+	movq -24(%rbp), %rdi
+	movq 8(%rdi), %rdi
+	movq %rdi, %rsi
+	movq $2, %rdi
+	addq %rsi, %rdi
+	movq %rdi, %r12
+#Uamp of aux3
+	movq %rbp, %rdi
+	addq $-24, %rdi
+	movq 0(%rdi), %rdi
+	addq $8, %rdi
+	movq %r12, 0(%rdi)
+#begin print
+#ident of aux3
+	movq -24(%rbp), %rdi
+	movq 0(%rdi), %rdi
+	call print_int
+	call print_space
+#ident of aux3
+	movq -24(%rbp), %rdi
+	movq 8(%rdi), %rdi
+	call print_int
+	call print_space
+#end print
+	pushq $0
+	movq $16, %rdi
+	call allocz
+	movq %rax, %rdi
+	movq %rdi, -32(%rbp)
+#ident of aux3
+	movq -24(%rbp), %rdi
+	movq 0(%rdi), %rdi
+	movq %rdi, -32(%rbp)
+#begin print
+#ident of d
+	movq -32(%rbp), %rdi
+	movq 0(%rdi), %rdi
+	call print_int
+	call print_space
+#ident of d
+	movq -32(%rbp), %rdi
+	movq 8(%rdi), %rdi
+	call print_int
+	call print_space
+#end print
+	addq $32, %rsp
 E_main:
 	movq %rbp, %rsp
 	popq %rbp
@@ -77,7 +214,7 @@ print_bool:
       mov     $S_true, %rdi
       call    printf
       ret
-      mov     $S_false, %rdi
+1:      mov     $S_false, %rdi
       call    printf
       ret
 allocz:
@@ -105,5 +242,7 @@ S_space:
 	.string " "
 S_empty:
 	.string ""
+S_2:
+	.string "\n"
 S_1:
 	.string "\n"

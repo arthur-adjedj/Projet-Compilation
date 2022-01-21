@@ -94,12 +94,9 @@ let htbl_to_list e e' h = (*très fier de cette horreur*)
     (make (TEassign([make (TEdot(e,y)) y.f_typ ],[make (TEdot(e',y)) y.f_typ])) tvoid)::z) h [] in 
    a
 
-
 let rec expr rw e =
   let _ty = e.expr_typ in
   let mk d = { e with expr_desc = d } in
-  Pretty.expr Format.std_formatter e;
-  Format.pp_print_newline Format.std_formatter ();
   match e.expr_desc with
   | TEskip
   | TEnil
@@ -223,6 +220,22 @@ and block rw = function
 and exprs rw el =
   List.map (expr rw) el
 
+let rec sep_assign_struct e = match e.expr_desc with
+   |TEassign([a],[{expr_desc = TEnew(_)}]) -> e
+   |TEassign([a],[b]) -> (match a.expr_typ with
+      |Tstruct s  -> 
+         {e with expr_desc = (TEblock(htbl_to_list a b s.s_fields))}
+      (*TODO match Tptr (Tstruct s)*)
+      |_ -> e 
+   )
+   |TEblock(l) -> {e with expr_desc = TEblock (List.map sep_assign_struct l)}
+   |_ -> e
+
+let fix_fun_type = function   
+      |Tstruct s -> Tptr(Tstruct s )
+      |ty -> ty
+
+
 let function_ f e =
   let param (rw, init as acc) ({v_typ = ty} as v) =
     if is_struct ty then
@@ -248,8 +261,8 @@ let function_ f e =
        let result ty = mkvar (Tptr ty) in
        let vl = List.map result tyl in
        { rw with retvl = vl }, pl @ vl, [] in
-  let f = { f with fn_params = pl } in
-  TDfunction (f, stmt (TEblock (init @ [expr rw e])))
+  let f = { f with fn_params = pl ;fn_typ = List.map fix_fun_type f.fn_typ} in
+  TDfunction (f, sep_assign_struct (stmt (TEblock (init @ [expr rw e]))))
 
 let decl = function
   | TDfunction (f, e) -> function_ f e
